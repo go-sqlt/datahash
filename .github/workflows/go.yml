@@ -39,7 +39,7 @@ jobs:
           link: https://github.com/go-sqlt/datahash/actions
 
       - name: Check if README.md Changed
-        uses: tj-actions/verify-changed-files@v16
+        uses: tj-actions/verify-changed-files@v17
         id: verify-changed-files
         with:
           files: README.md
