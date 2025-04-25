@@ -9,10 +9,10 @@ linters:
     - wrapcheck
     - varnamelen
     # - tagliatelle
-    # - revive
+    - revive
     # - paralleltest
     # - containedctx
-    # - mnd
+    - mnd
     - lll
     # - ireturn
     - gocognit
@@ -20,11 +20,12 @@ linters:
     - funlen
     - nonamedreturns
     - forcetypeassert
-    # - exhaustruct
+    - exhaustruct
     - exhaustive
     - err113
-    # - depguard
+    - depguard
     - cyclop
     - gocyclo
-    # - maintidx
+    - maintidx
     # - nestif
+    - forbidigo
