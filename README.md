@@ -81,3 +81,17 @@ func main() {
 - Maps and sets are folded with XOR for unordered consistency.
 - Pointer cycles are detected and skipped safely.
 - To define custom hashing, implement the Hashable interface.
+
+## Benchmark
+
+```go
+go test -bench=. -benchmem
+goos: darwin
+goarch: arm64
+pkg: github.com/go-sqlt/datahash
+cpu: Apple M3 Pro
+BenchmarkDatahash-12             2420667               476.3 ns/op           272 B/op         12 allocs/op
+BenchmarkHashstructure-12         810531              1411 ns/op             944 B/op         66 allocs/op
+PASS
+ok      github.com/go-sqlt/datahash     2.974s
+```
