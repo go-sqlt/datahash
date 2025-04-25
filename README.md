@@ -85,13 +85,14 @@ func main() {
 ## Benchmark
 
 ```go
-go test -bench=. -benchmem
+go test -bench=. -benchmem            
 goos: darwin
 goarch: arm64
 pkg: github.com/go-sqlt/datahash
 cpu: Apple M3 Pro
-BenchmarkDatahash-12             2420667               476.3 ns/op           272 B/op         12 allocs/op
-BenchmarkHashstructure-12         810531              1411 ns/op             944 B/op         66 allocs/op
+BenchmarkDatahash-12             2447470               482.1 ns/op           272 B/op         12 allocs/op
+BenchmarkHashstructure-12         816633              1438 ns/op             944 B/op         66 allocs/op
+BenchmarkJSON-12                 2526873               471.8 ns/op           306 B/op          7 allocs/op
 PASS
-ok      github.com/go-sqlt/datahash     2.974s
+ok      github.com/go-sqlt/datahash     3.702s
 ```
