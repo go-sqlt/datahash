@@ -153,12 +153,18 @@ func (h *Hasher[H]) Hash(value any) (uint64, error) {
 
 	v := reflect.ValueOf(value)
 
-	hasher, err := h.makeHashFunc(v.Type(), h.defaultOpts)
+	if !v.IsValid() || v.IsZero() {
+		return 0, nil
+	}
+
+	visitedTypes := map[reflect.Type]struct{}{}
+
+	hasher, err := h.makeHashFunc(v.Type(), visitedTypes, h.defaultOpts)
 	if err != nil {
 		return 0, err
 	}
 
-	err = hasher(hash, v, map[unsafe.Pointer]struct{}{}, h.defaultOpts)
+	err = hasher(hash, v, map[uintptr]struct{}{}, visitedTypes, h.defaultOpts)
 	if err != nil {
 		h.pool.Put(hash)
 
@@ -172,7 +178,7 @@ func (h *Hasher[H]) Hash(value any) (uint64, error) {
 	return result, nil
 }
 
-type hashFunc[H hash.Hash64] func(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error
+type hashFunc[H hash.Hash64] func(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error
 
 var (
 	openBrace    = []byte{'{'}
@@ -183,7 +189,7 @@ var (
 	closeBracket = []byte{']'}
 )
 
-func (h *Hasher[H]) hashByteSlice(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashByteSlice(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -193,49 +199,49 @@ func (h *Hasher[H]) hashByteSlice(hash H, value reflect.Value, _ map[unsafe.Poin
 	return err
 }
 
-func (h *Hasher[H]) hashInterface(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+func (h *Hasher[H]) hashInterface(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
 
 	elem := value.Elem()
 
-	hasher, err := h.makeHashFunc(elem.Type(), opts)
+	hasher, err := h.makeHashFunc(elem.Type(), visitedTypes, opts)
 	if err != nil {
 		return err
 	}
 
-	return hasher(hash, elem, visited, opts)
+	return hasher(hash, elem, visited, visitedTypes, opts)
 }
 
-func (h *Hasher[H]) hashString(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashString(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	_, err := hash.Write(stringToBytes(value.String()))
 
 	return err
 }
 
-func (h *Hasher[H]) hashInt(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashInt(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	return binary.Write(hash, binary.LittleEndian, value.Int())
 }
 
-func (h *Hasher[H]) hashUint(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashUint(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	return binary.Write(hash, binary.LittleEndian, value.Uint())
 }
 
-func (h *Hasher[H]) hashFloat(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashFloat(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	return binary.Write(hash, binary.LittleEndian, value.Float())
 }
 
-func (h *Hasher[H]) hashComplex(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashComplex(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	return binary.Write(hash, binary.LittleEndian, value.Complex())
 }
 
-func (h *Hasher[H]) hashBool(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashBool(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	return binary.Write(hash, binary.LittleEndian, value.Bool())
 }
 
 func (h *Hasher[H]) hashArray(vhf hashFunc[H]) hashFunc[H] {
-	return func(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+	return func(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 		if !value.IsValid() || value.IsZero() {
 			return nil
 		}
@@ -253,7 +259,7 @@ func (h *Hasher[H]) hashArray(vhf hashFunc[H]) hashFunc[H] {
 				}
 			}
 
-			err := vhf(hash, value.Index(i), visited, opts)
+			err := vhf(hash, value.Index(i), visited, visitedTypes, opts)
 			if err != nil {
 				return err
 			}
@@ -273,7 +279,7 @@ func (h *Hasher[H]) hashSlice(vhf hashFunc[H], opts Options) hashFunc[H] {
 		return h.hashArray(vhf)
 	}
 
-	return func(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+	return func(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 		if !value.IsValid() || value.IsZero() {
 			return nil
 		}
@@ -291,7 +297,7 @@ func (h *Hasher[H]) hashSlice(vhf hashFunc[H], opts Options) hashFunc[H] {
 
 			tmphash.Reset()
 
-			if err := vhf(tmphash, val, visited, opts); err != nil {
+			if err := vhf(tmphash, val, visited, visitedTypes, opts); err != nil {
 				h.pool.Put(tmphash)
 
 				return err
@@ -312,7 +318,7 @@ func (h *Hasher[H]) hashSlice(vhf hashFunc[H], opts Options) hashFunc[H] {
 }
 
 func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
-	return func(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+	return func(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 		if !value.IsValid() || value.IsZero() {
 			return nil
 		}
@@ -331,7 +337,7 @@ func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 
 			tmphash.Reset()
 
-			if err := khf(tmphash, key, visited, opts); err != nil {
+			if err := khf(tmphash, key, visited, visitedTypes, opts); err != nil {
 				h.pool.Put(tmphash)
 
 				return err
@@ -344,7 +350,7 @@ func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 				return err
 			}
 
-			if err := vhf(tmphash, val, visited, opts); err != nil {
+			if err := vhf(tmphash, val, visited, visitedTypes, opts); err != nil {
 				h.pool.Put(tmphash)
 
 				return err
@@ -371,18 +377,9 @@ type structField[H hash.Hash64] struct {
 }
 
 func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
-	return func(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+	return func(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 		if !value.IsValid() || value.IsZero() {
 			return nil
-		}
-
-		if value.CanAddr() {
-			ptr := value.Addr().UnsafePointer()
-			if _, ok := visited[ptr]; ok {
-				return nil
-			}
-
-			visited[ptr] = struct{}{}
 		}
 
 		_, err := hash.Write(openBrace)
@@ -403,14 +400,14 @@ func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
 				return err
 			}
 
-			_, err := hash.Write(colon)
+			_, err = hash.Write(colon)
 			if err != nil {
 				h.pool.Put(hash)
 
 				return err
 			}
 
-			if err := sf.hf(hash, value.Field(sf.idx), visited, opts); err != nil {
+			if err := sf.hf(hash, value.Field(sf.idx), visited, visitedTypes, opts); err != nil {
 				return err
 			}
 		}
@@ -429,7 +426,7 @@ type setPair struct {
 	val reflect.Value
 }
 
-func (h *Hasher[H]) hashSeq2(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+func (h *Hasher[H]) hashSeq2(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -454,12 +451,12 @@ func (h *Hasher[H]) hashSeq2(hash H, value reflect.Value, visited map[unsafe.Poi
 		return nil
 	}
 
-	khf, err := h.makeHashFunc(pairs[0].key.Type(), opts)
+	khf, err := h.makeHashFunc(pairs[0].key.Type(), visitedTypes, opts)
 	if err != nil {
 		return err
 	}
 
-	vhf, err := h.makeHashFunc(pairs[0].val.Type(), opts)
+	vhf, err := h.makeHashFunc(pairs[0].val.Type(), visitedTypes, opts)
 	if err != nil {
 		return err
 	}
@@ -472,7 +469,7 @@ func (h *Hasher[H]) hashSeq2(hash H, value reflect.Value, visited map[unsafe.Poi
 			}
 		}
 
-		if err := khf(hash, pair.key, visited, opts); err != nil {
+		if err := khf(hash, pair.key, visited, visitedTypes, opts); err != nil {
 			return err
 		}
 
@@ -481,7 +478,7 @@ func (h *Hasher[H]) hashSeq2(hash H, value reflect.Value, visited map[unsafe.Poi
 			return err
 		}
 
-		if err := vhf(hash, pair.val, visited, opts); err != nil {
+		if err := vhf(hash, pair.val, visited, visitedTypes, opts); err != nil {
 			return err
 		}
 	}
@@ -494,7 +491,7 @@ func (h *Hasher[H]) hashSeq2(hash H, value reflect.Value, visited map[unsafe.Poi
 	return nil
 }
 
-func (h *Hasher[H]) hashSeq(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+func (h *Hasher[H]) hashSeq(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -513,7 +510,7 @@ func (h *Hasher[H]) hashSeq(hash H, value reflect.Value, visited map[unsafe.Poin
 		if first {
 			first = false
 
-			vhf, err = h.makeHashFunc(v.Type(), opts)
+			vhf, err = h.makeHashFunc(v.Type(), visitedTypes, opts)
 			if err != nil {
 				return err
 			}
@@ -524,7 +521,7 @@ func (h *Hasher[H]) hashSeq(hash H, value reflect.Value, visited map[unsafe.Poin
 			}
 		}
 
-		if err := vhf(hash, v, visited, opts); err != nil {
+		if err := vhf(hash, v, visited, visitedTypes, opts); err != nil {
 			return err
 		}
 	}
@@ -537,7 +534,7 @@ func (h *Hasher[H]) hashSeq(hash H, value reflect.Value, visited map[unsafe.Poin
 	return nil
 }
 
-func (h *Hasher[H]) hashInterfaceHashable(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashInterfaceHashable(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -552,7 +549,7 @@ func (h *Hasher[H]) hashInterfaceHashable(hash H, value reflect.Value, _ map[uns
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceBinary(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashInterfaceBinary(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -567,7 +564,7 @@ func (h *Hasher[H]) hashInterfaceBinary(hash H, value reflect.Value, _ map[unsaf
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceText(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashInterfaceText(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -582,7 +579,7 @@ func (h *Hasher[H]) hashInterfaceText(hash H, value reflect.Value, _ map[unsafe.
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceJSON(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashInterfaceJSON(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -597,7 +594,7 @@ func (h *Hasher[H]) hashInterfaceJSON(hash H, value reflect.Value, _ map[unsafe.
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceStringer(hash H, value reflect.Value, _ map[unsafe.Pointer]struct{}, _ Options) error {
+func (h *Hasher[H]) hashInterfaceStringer(hash H, value reflect.Value, _ map[uintptr]struct{}, _ map[reflect.Type]struct{}, _ Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
@@ -615,10 +612,18 @@ var (
 	stringerType        = reflect.TypeFor[fmt.Stringer]()
 )
 
-func (h *Hasher[H]) makeHashFunc(t reflect.Type, opts Options) (hf hashFunc[H], err error) {
+func (h *Hasher[H]) makeHashFunc(t reflect.Type, visitedTypes map[reflect.Type]struct{}, opts Options) (hf hashFunc[H], err error) {
 	if cached, ok := h.store.Load(t); ok {
 		return cached.(hashFunc[H]), nil
 	}
+
+	if _, ok := visitedTypes[t]; ok {
+		return func(H, reflect.Value, map[uintptr]struct{}, map[reflect.Type]struct{}, Options) error {
+			return nil
+		}, nil
+	}
+
+	visitedTypes[t] = struct{}{}
 
 	defer func() {
 		if err == nil {
@@ -650,24 +655,26 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, opts Options) (hf hashFunc[H], 
 	case reflect.Interface:
 		return h.hashInterface, nil
 	case reflect.Pointer:
-		hasher, err := h.makeHashFunc(t.Elem(), opts)
+		hasher, err := h.makeHashFunc(t.Elem(), visitedTypes, opts)
 		if err != nil {
 			return nil, err
 		}
 
-		return func(hash H, value reflect.Value, visited map[unsafe.Pointer]struct{}, opts Options) error {
+		return func(hash H, value reflect.Value, visited map[uintptr]struct{}, visitedTypes map[reflect.Type]struct{}, opts Options) error {
 			if !value.IsValid() || value.IsZero() {
 				return nil
 			}
 
-			ptr := value.UnsafePointer()
-			if _, ok := visited[ptr]; ok {
-				return nil
+			addr := value.Pointer()
+			if addr != 0 {
+				if _, ok := visited[addr]; ok {
+					return nil
+				}
+
+				visited[addr] = struct{}{}
 			}
 
-			visited[ptr] = struct{}{}
-
-			return hasher(hash, value.Elem(), visited, opts)
+			return hasher(hash, value.Elem(), visited, visitedTypes, opts)
 		}, nil
 	case reflect.String:
 		return h.hashString, nil
@@ -682,7 +689,7 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, opts Options) (hf hashFunc[H], 
 	case reflect.Bool:
 		return h.hashBool, nil
 	case reflect.Array:
-		vhf, err := h.makeHashFunc(t.Elem(), opts)
+		vhf, err := h.makeHashFunc(t.Elem(), visitedTypes, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -695,19 +702,19 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, opts Options) (hf hashFunc[H], 
 			return h.hashByteSlice, nil
 		}
 
-		vhf, err := h.makeHashFunc(elem, opts)
+		vhf, err := h.makeHashFunc(elem, visitedTypes, opts)
 		if err != nil {
 			return nil, err
 		}
 
 		return h.hashSlice(vhf, opts), nil
 	case reflect.Map:
-		khf, err := h.makeHashFunc(t.Key(), opts)
+		khf, err := h.makeHashFunc(t.Key(), visitedTypes, opts)
 		if err != nil {
 			return nil, err
 		}
 
-		vhf, err := h.makeHashFunc(t.Elem(), opts)
+		vhf, err := h.makeHashFunc(t.Elem(), visitedTypes, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -728,12 +735,12 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, opts Options) (hf hashFunc[H], 
 				continue
 			}
 
-			opts, err = with(opts, tag)
+			localOpts, err := with(opts, tag)
 			if err != nil {
 				return nil, err
 			}
 
-			hf, err := h.makeHashFunc(sf.Type, opts)
+			hf, err := h.makeHashFunc(sf.Type, visitedTypes, localOpts)
 			if err != nil {
 				return nil, err
 			}
