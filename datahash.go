@@ -223,8 +223,8 @@ var (
 	byteFalse    = [1]byte{0}
 )
 
-func (h *Hasher[H]) hashByteSlice(value reflect.Value, c *container[H], _ Options) error {
-	if !value.IsValid() || value.IsZero() {
+func (h *Hasher[H]) hashByteSlice(value reflect.Value, c *container[H], opts Options) error {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
@@ -234,11 +234,15 @@ func (h *Hasher[H]) hashByteSlice(value reflect.Value, c *container[H], _ Option
 }
 
 func (h *Hasher[H]) hashInterface(value reflect.Value, c *container[H], opts Options) error {
-	if !value.IsValid() || value.IsZero() {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
 	elem := value.Elem()
+
+	if elem.Kind() == reflect.Invalid {
+		return nil
+	}
 
 	hasher, err := h.makeHashFunc(elem.Type(), c, opts)
 	if err != nil {
@@ -309,7 +313,7 @@ func (h *Hasher[H]) hashBool(value reflect.Value, c *container[H], _ Options) er
 
 func (h *Hasher[H]) hashArray(vhf hashFunc[H]) hashFunc[H] {
 	return func(value reflect.Value, c *container[H], opts Options) error {
-		if !value.IsValid() || value.IsZero() {
+		if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 			return nil
 		}
 
@@ -347,7 +351,7 @@ func (h *Hasher[H]) hashSlice(vhf hashFunc[H], opts Options) hashFunc[H] {
 	}
 
 	return func(value reflect.Value, c *container[H], opts Options) error {
-		if !value.IsValid() || value.IsZero() {
+		if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 			return nil
 		}
 
@@ -358,7 +362,7 @@ func (h *Hasher[H]) hashSlice(vhf hashFunc[H], opts Options) hashFunc[H] {
 
 		for i := range value.Len() {
 			val := value.Index(i)
-			if !val.IsValid() || val.IsZero() {
+			if !val.IsValid() {
 				continue
 			}
 
@@ -385,7 +389,7 @@ func (h *Hasher[H]) hashSlice(vhf hashFunc[H], opts Options) hashFunc[H] {
 
 func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 	return func(value reflect.Value, c *container[H], opts Options) error {
-		if !value.IsValid() || value.IsZero() {
+		if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 			return nil
 		}
 
@@ -445,7 +449,7 @@ type structField[H hash.Hash64] struct {
 
 func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
 	return func(value reflect.Value, c *container[H], opts Options) error {
-		if !value.IsValid() || value.IsZero() {
+		if !value.IsValid() {
 			return nil
 		}
 
@@ -468,9 +472,9 @@ func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
 				if err != nil {
 					return err
 				}
+			} else {
+				first = false
 			}
-
-			first = false
 
 			_, err = c.hash.Write(sf.name)
 			if err != nil {
@@ -494,7 +498,7 @@ func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
 }
 
 func (h *Hasher[H]) hashSeq2(value reflect.Value, c *container[H], opts Options) error {
-	if !value.IsValid() || value.IsZero() {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
@@ -579,9 +583,9 @@ func (h *Hasher[H]) hashSeq2(value reflect.Value, c *container[H], opts Options)
 			if _, err = c.hash.Write(comma[:]); err != nil {
 				return err
 			}
+		} else {
+			first = false
 		}
-
-		first = false
 
 		if khf == nil || vhf == nil {
 			khf, err = h.makeHashFunc(k.Type(), c, opts)
@@ -614,7 +618,7 @@ func (h *Hasher[H]) hashSeq2(value reflect.Value, c *container[H], opts Options)
 }
 
 func (h *Hasher[H]) hashSeq(value reflect.Value, c *container[H], opts Options) error {
-	if !value.IsValid() || value.IsZero() {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
@@ -687,16 +691,16 @@ func (h *Hasher[H]) hashSeq(value reflect.Value, c *container[H], opts Options) 
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceHashWriter(value reflect.Value, c *container[H], _ Options) error {
-	if !value.IsValid() || value.IsZero() {
+func (h *Hasher[H]) hashInterfaceHashWriter(value reflect.Value, c *container[H], opts Options) error {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
 	return value.Interface().(HashWriter).WriteHash(c.hash)
 }
 
-func (h *Hasher[H]) hashInterfaceBinary(value reflect.Value, c *container[H], _ Options) error {
-	if !value.IsValid() || value.IsZero() {
+func (h *Hasher[H]) hashInterfaceBinary(value reflect.Value, c *container[H], opts Options) error {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
@@ -710,8 +714,8 @@ func (h *Hasher[H]) hashInterfaceBinary(value reflect.Value, c *container[H], _ 
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceText(value reflect.Value, c *container[H], _ Options) error {
-	if !value.IsValid() || value.IsZero() {
+func (h *Hasher[H]) hashInterfaceText(value reflect.Value, c *container[H], opts Options) error {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
@@ -725,8 +729,8 @@ func (h *Hasher[H]) hashInterfaceText(value reflect.Value, c *container[H], _ Op
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceJSON(value reflect.Value, c *container[H], _ Options) error {
-	if !value.IsValid() || value.IsZero() {
+func (h *Hasher[H]) hashInterfaceJSON(value reflect.Value, c *container[H], opts Options) error {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
@@ -740,8 +744,8 @@ func (h *Hasher[H]) hashInterfaceJSON(value reflect.Value, c *container[H], _ Op
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceStringer(value reflect.Value, c *container[H], _ Options) error {
-	if !value.IsValid() || value.IsZero() {
+func (h *Hasher[H]) hashInterfaceStringer(value reflect.Value, c *container[H], opts Options) error {
+	if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 		return nil
 	}
 
