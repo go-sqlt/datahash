@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"github.com/go-sqlt/datahash"
-	hashstructure "github.com/mitchellh/hashstructure/v2"
+	gohugoio "github.com/gohugoio/hashstructure"
+	mitchellh "github.com/mitchellh/hashstructure/v2"
 )
 
 type Nested struct {
@@ -70,11 +71,21 @@ func BenchmarkHashers(b *testing.B) {
 		}
 	})
 
-	b.Run("Hashstructure+FNV", func(b *testing.B) {
+	b.Run("Mitchellh/Hashstructure+FNV", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			if _, err := hashstructure.Hash(val, hashstructure.FormatV2, nil); err != nil {
+			if _, err := mitchellh.Hash(val, mitchellh.FormatV2, nil); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Gohugoio/Hashstructure+FNV", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := gohugoio.Hash(val, nil); err != nil {
 				b.Fatal(err)
 			}
 		}
