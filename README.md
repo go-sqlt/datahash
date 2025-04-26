@@ -10,13 +10,13 @@ The package is highly customizable, efficient, and integrates with standard Go i
 
 ## Features
 
-- Consistent 64-bit hashing of any Go value
-- Handles cyclic data structures safely (pointer tracking)
-- Supports struct tags and per-field options
-- Slices can be treated as unordered sets (set option)
-- Integrates with: encoding.BinaryMarshaler, encoding.TextMarshaler, encoding/json.Marshaler, fmt.Stringer
-- Supports custom hash logic via datahash.HashWriter interface
-- High performance: type caching and hasher pooling
+- Consistent 64-bit hashing of any Go value.
+- Handles cyclic data structures safely (pointer tracking).
+- Supports struct tags and per-field options.
+- Slices, iter.Seq, iter.Seq2 can be treated as unordered sets (like Maps).
+- Integrates with: encoding.BinaryMarshaler, encoding.TextMarshaler, encoding/json.Marshaler, fmt.Stringer.
+- Supports custom hash logic via datahash.HashWriter interface.
+- High performance: type caching and hasher pooling.
 
 ## Installation
 
@@ -66,24 +66,24 @@ func main() {
 
 ## Options
 
-- Tag: Struct tag to control field behavior (default: datahash)
-- Marker: Add type markers to the hash (datahash:"marker")
-- Set: Treat slices as unordered sets (datahash:"set")
-- Binary: Prefer encoding.BinaryMarshaler (datahash:"binary")
-- Text: Prefer encoding.TextMarshaler (datahash:"text")
-- JSON: Prefer json.Marshaler (datahash:"json")
-- String: Prefer fmt.Stringer (datahash:"string")
-- ZeroNil: Treat nil pointers as zero values (datahash:"zeronil")
-- IgnoreZero: Skip zero-value fields from hash (datahash:"ignorezero")
+- Tag: Struct tag to control field behavior (default: datahash).
+- Marker: Add type markers to the hash (datahash:"marker").
+- Set: Treat slices, iter.Seq, iter.Seq2 as unordered sets (datahash:"set").
+- Binary: Prefer encoding.BinaryMarshaler (datahash:"binary").
+- Text: Prefer encoding.TextMarshaler (datahash:"text").
+- JSON: Prefer json.Marshaler (datahash:"json").
+- String: Prefer fmt.Stringer (datahash:"string").
+- ZeroNil: Treat nil pointers as zero values (datahash:"zeronil").
+- IgnoreZero: Skip zero-value fields from hash (datahash:"ignorezero").
 
 ## Notes
 
-- Only exported fields are considered
-- Struct fields are hashed in their declared order
-- Maps and sets are folded using XOR for order-independence
-- Cyclic pointers are detected and skipped safely
-- Use datahash:"-" to exclude fields from hashing
-- Implement HashWriter for custom hash behavior
+- Only exported fields are considered.
+- Struct fields are hashed in their declared order.
+- Maps and sets are folded using XOR for order-independence.
+- Cyclic pointers are detected and skipped safely.
+- Use datahash:"-" to exclude fields from hashing.
+- Implement HashWriter for custom hash behavior.
 
 ## Benchmark
 
