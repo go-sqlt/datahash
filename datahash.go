@@ -20,7 +20,7 @@
 //	)
 //
 //	type MyStruct struct {
-//		Name  string    `datahash:"-"`     // field ignored
+//		Name  string     `datahash:"-"`    // field ignored
 //		Age   int
 //		Float *big.Float `datahash:"text"` // uses encoding.TextMarshaler
 //	}
@@ -391,6 +391,7 @@ func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 		var (
 			result uint64
 			tmp    = h.pool.Get().(*container[H])
+			err    error
 		)
 
 		keys := value.MapKeys()
@@ -402,7 +403,7 @@ func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 
 			tmp.Reset()
 
-			err := khf(key, tmp, opts)
+			err = khf(key, tmp, opts)
 			if err != nil {
 				h.pool.Put(tmp)
 
@@ -429,7 +430,7 @@ func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 
 		binary.LittleEndian.PutUint64(c.buf[:], result)
 
-		_, err := c.hash.Write(c.buf[:])
+		_, err = c.hash.Write(c.buf[:])
 
 		return err
 	}
@@ -574,7 +575,7 @@ func (h *Hasher[H]) hashSeq2(value reflect.Value, c *container[H], opts Options)
 		}
 
 		if !first {
-			if _, err := c.hash.Write(comma[:]); err != nil {
+			if _, err = c.hash.Write(comma[:]); err != nil {
 				return err
 			}
 		}
