@@ -44,7 +44,16 @@ type MyStruct struct {
 }
 
 func main() {
-	hasher := datahash.New(xxhash.New, datahash.Options{JSON: true})
+    hasher := datahash.New(xxhash.New, datahash.Options{
+        Marker:     false,
+        Set:        false,
+        Binary:     false,
+        Text:       false,
+        JSON:       false,
+        String:     false,
+        ZeroNil:    false,
+        IgnoreZero: false,
+    })
 
 	alice, err := hasher.Hash(MyStruct{
 		Name:  "Alice",

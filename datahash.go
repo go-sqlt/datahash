@@ -20,13 +20,22 @@
 //	)
 //
 //	type MyStruct struct {
-//		Name  string     `datahash:"-"`    // field ignored
+//		Name  string `datahash:"-"`
 //		Age   int
-//		Float *big.Float `datahash:"text"` // uses encoding.TextMarshaler
+//		Float *big.Float `datahash:"text"`
 //	}
 //
 //	func main() {
-//		hasher := datahash.New(fnv.New64a, datahash.Options{})
+//		hasher := datahash.New(fnv.New64a, datahash.Options{
+//			Marker:     false,
+//			Set:        false,
+//			Binary:     false,
+//			Text:       false,
+//			JSON:       false,
+//			String:     false,
+//			ZeroNil:    false,
+//			IgnoreZero: false,
+//		})
 //
 //		alice, _ := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
 //		bob, _ := hasher.Hash(MyStruct{Name: "Bob", Age: 30, Float: big.NewFloat(1.23)})
