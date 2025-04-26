@@ -5,18 +5,18 @@
 [![Coverage](https://img.shields.io/badge/Coverage-57.1%25-yellow)](https://github.com/go-sqlt/datahash/actions)
 
 datahash provides a hashing system for arbitrary Go values with zero dependencies.  
-It produces consistent 64-bit hashes by recursively traversing Go data structures and considering actual content.  
+It produces consistent 64-bit hashes by recursively traversing Go data structures.  
 The package is highly customizable, efficient, and integrates with standard Go interfaces.
 
 ## Features
 
-- Consistent 64-bit hashing of any Go value.
-- Handles cyclic data structures safely via pointer tracking.
-- Supports struct tags and options to control behavior.
-- Supports slices as unordered sets (set option).
-- Integrates with: encoding.BinaryMarshaler, encoding.TextMarshaler, encoding/json.Marshaler and fmt.Stringer.
-- Custom datahash.Hashable interface.
-- High performance via: caching per type and pooling of hash.Hash64 instances.
+- Consistent 64-bit hashing of any Go value
+- Handles cyclic data structures safely (pointer tracking)
+- Supports struct tags and per-field options
+- Slices can be treated as unordered sets (set option)
+- Integrates with: encoding.BinaryMarshaler, encoding.TextMarshaler, encoding/json.Marshaler, fmt.Stringer
+- Supports custom hash logic via datahash.HashWriter interface
+- High performance: type caching and hasher pooling
 
 ## Installation
 
@@ -66,33 +66,39 @@ func main() {
 
 ## Options
 
-- Tag: Struct Tag (default: `datahash`).
-- Set: Treats slices as sets (`datahash:"set"`).
-- Binary: prefer encoding.BinaryMarshaler if implemented (`datahash:"binary"`).
-- Text: prefer encoding.TextMarshaler if implemented (`datahash:"text"`).
-- JSON: prefer json.Marshaler if implemented (`datahash:"json"`).
-- String: prefer fmt.Stringer if implemented (`datahash:"string"`).
+- Tag: Struct tag to control field behavior (default: datahash)
+- Marker: Add type markers to the hash (datahash:"marker")
+- Set: Treat slices as unordered sets (datahash:"set")
+- Binary: Prefer encoding.BinaryMarshaler (datahash:"binary")
+- Text: Prefer encoding.TextMarshaler (datahash:"text")
+- JSON: Prefer json.Marshaler (datahash:"json")
+- String: Prefer fmt.Stringer (datahash:"string")
+- ZeroNil: Treat nil pointers as zero values (datahash:"zeronil")
+- IgnoreZero: Skip zero-value fields from hash (datahash:"ignorezero")
 
 ## Notes
 
-- Only exported fields are hashed.
-- Fields are hashed in declaration order.
-- Use `datahash:"-"` to ignore a field.
-- Maps and sets are folded with XOR for unordered consistency.
-- Pointer cycles are detected and skipped safely.
-- To define custom hashing, implement the Hashable interface.
+- Only exported fields are considered
+- Struct fields are hashed in their declared order
+- Maps and sets are folded using XOR for order-independence
+- Cyclic pointers are detected and skipped safely
+- Use datahash:"-" to exclude fields from hashing
+- Implement HashWriter for custom hash behavior
 
 ## Benchmark
 
 ```go
-go test -bench=. -benchmem                                  
+go test -bench=. -benchmem                                                  
 goos: darwin
 goarch: arm64
 pkg: github.com/go-sqlt/datahash
 cpu: Apple M3 Pro
-BenchmarkDatahash-12             1975732               606.3 ns/op           280 B/op         11 allocs/op
-BenchmarkHashstructure-12         335929              3613 ns/op            2544 B/op        159 allocs/op
-BenchmarkJSON-12                 1239986               965.3 ns/op           516 B/op          8 allocs/op
+BenchmarkHashers/Datahash+FNV_(Marker=false)-12                  1988764               573.8 ns/op           258 B/op          8 allocs/op
+BenchmarkHashers/Datahash+FNV_(Marker=true)-12                   1672119               716.8 ns/op           258 B/op          8 allocs/op
+BenchmarkHashers/Hashstructure+FNV-12                             346440              3367 ns/op            2544 B/op        159 allocs/op
+BenchmarkHashers/JSON+FNV-12                                     1256473               954.3 ns/op           516 B/op          8 allocs/op
+BenchmarkHashers/JSON_only-12                                    1847144               654.8 ns/op           516 B/op          8 allocs/op
+BenchmarkHashers/FNV_only-12                                     4136947               289.7 ns/op             0 B/op          0 allocs/op
 PASS
-ok      github.com/go-sqlt/datahash     3.804s
+ok      github.com/go-sqlt/datahash     10.594s
 ```

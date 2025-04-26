@@ -27,5 +27,5 @@ linters:
     - cyclop
     - gocyclo
     - maintidx
-    # - nestif
+    - nestif
     - forbidigo

@@ -1,0 +1,22 @@
+name: Nightly Fuzz
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # every day at 2am UTC
+
+jobs:
+  nightly-fuzz:
+    name: Fuzz Testing (Nightly Long Run)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Run Fuzz Tests (long)
+        run: |
+          go test -fuzz=Fuzz -fuzztime=1h ./...

@@ -1,57 +1,52 @@
 // Package datahash computes 64-bit hashes for arbitrary Go values using reflection.
 //
-// It recursively walks the structure of Go values to produce consistent hashes
-// based on the actual data. Supported types include primitives, arrays, slices, maps,
-// structs, pointers, and interfaces.
+// It recursively traverses Go values to produce deterministic hashes based on their content and structure.
+// Supported types include primitives, arrays, slices, maps, structs, pointers, interfaces, and sequential types.
 //
 // Features:
-//   - Handles cyclic data structures safely (pointer tracking).
-//   - Customization via struct tags and Options.
-//   - Supports slices as unordered sets ("set" option).
-//   - Integrates with encoding.BinaryMarshaler, encoding.TextMarshaler, fmt.Stringer, and Hashable.
-//   - Efficient through caching and hasher pooling.
+//   - Detects and handles cyclic data structures safely (via pointer tracking).
+//   - Allows customization of hashing via struct tags and Options.
+//   - Supports ordered and unordered hashing of sequences (using the "set" option).
+//   - Integrates with encoding.BinaryMarshaler, encoding.TextMarshaler, fmt.Stringer, and custom HashWriter interfaces.
+//   - High performance through reflection caching and hasher pooling.
 //
 // Usage:
 //
-// import (
-//
-//	"fmt"
-//	"hash/fnv"
-//	"math/big"
-//
-//	"github.com/go-sqlt/datahash"
-//
-// )
+//	import (
+//		"fmt"
+//		"hash/fnv"
+//		"math/big"
+//		"github.com/go-sqlt/datahash"
+//	)
 //
 //	type MyStruct struct {
-//			Name  string `datahash:"-"`
-//			Age   int
-//			Float *big.Float `datahash:"text"`
+//		Name  string    `datahash:"-"`     // field ignored
+//		Age   int
+//		Float *big.Float `datahash:"text"` // uses encoding.TextMarshaler
 //	}
 //
 //	func main() {
-//			hasher := datahash.New(fnv.New64a, datahash.Options{})
+//		hasher := datahash.New(fnv.New64a, datahash.Options{})
 //
-//			alice, err := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
-//			fmt.Println(alice, err)
-//			// 10743316167976689248 <nil>
+//		alice, _ := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
+//		bob, _ := hasher.Hash(MyStruct{Name: "Bob", Age: 30, Float: big.NewFloat(1.23)})
 //
-//				bob, err := hasher.Hash(MyStruct{Name: "Bob", Age: 30, Float: big.NewFloat(1.23)})
-//				fmt.Println(bob, err)
-//				// 10743316167976689248 <nil>
-//		}
+//		fmt.Println(alice == bob) // Output: true
+//	}
 //
 // Options:
-//   - Tag: struct tag key to read options from (default "datahash").
-//   - Set: treat slices as unordered sets (`datahash:"set"`).
-//   - Binary/Text/JSON/String: prefer marshaling interfaces if implemented (`datahash:"binary,text,json,string"`).
+//   - Tag: struct tag key for reading field options (default "datahash").
+//   - Marker: include type information into the hash ("marker").
+//   - Set: treat slices, maps, and sequences as unordered sets ("set").
+//   - Binary/Text/JSON/String: use marshaling interfaces if available ("binary,text,json,string").
+//   - ZeroNil: treat nil pointers like zero values ("zeronil").
+//   - IgnoreZero: skip fields with zero values ("ignorezero").
 //
 // Notes:
-//   - Use `datahash:"-"` to ignore a field.
+//   - Use `datahash:"-"` to exclude a field from hashing.
 //   - Struct fields are hashed in their declared order.
-//   - Maps and sets are folded with XOR to handle unordered keys/values.
 //   - Only exported fields are considered.
-//   - To add custom hash logic to a type, implement the Hashable interface.
+//   - For custom hashing behavior, implement the HashWriter interface.
 package datahash
 
 import (
@@ -60,6 +55,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -67,24 +63,34 @@ import (
 	"unsafe"
 )
 
-// Hashable can be implemented by custom types that want to define
-// their own hashing logic. This allows complete control over what
-// is hashed and how.
-type Hashable interface {
-	Hash() ([]byte, error)
+// HashWriter can be implemented by types that want to define
+// custom hashing behavior.
+//
+// The WriteHash method is responsible for writing a representation
+// of the value directly into the provided hash.Hash64.
+type HashWriter interface {
+	WriteHash(hash hash.Hash64) error
 }
 
-// Options defines how the hashing behavior should be customized.
+// Options specifies configuration for hashing behavior.
+//
+// Options can be set globally when creating a Hasher, and can also
+// be overridden per field via struct tags.
 //
 // Fields:
-//   - Tag: struct tag name to look for (default: "datahash").
-//   - Set: if true, treats slices as unordered sets.
-//   - Binary/Text/JSON/String: use corresponding interface methods
-//     (e.g., encoding.BinaryMarshaler) if implemented.
+//   - Tag: struct tag key to read options from (default "datahash").
+//   - Marker: whether to include type information in the hash ("marker").
+//   - Set: treat slices, maps, and sequences as unordered sets ("set").
+//   - Binary, Text, JSON, String: prefer marshaling interfaces if available.
+//   - ZeroNil: treat nil pointers like zero values ("zeronil").
+//   - IgnoreZero: skip fields that have zero values ("ignorezero").
 type Options struct {
 	Tag                        string
+	Marker                     bool
 	Set                        bool
 	Binary, Text, JSON, String bool
+	ZeroNil                    bool
+	IgnoreZero                 bool
 }
 
 func with(opts Options, tag string) (Options, error) {
@@ -96,6 +102,8 @@ func with(opts Options, tag string) (Options, error) {
 		switch each {
 		default:
 			return opts, fmt.Errorf("datahash: unknown struct tag option: %q", each)
+		case "marker":
+			opts.Marker = true
 		case "json":
 			opts.JSON = true
 		case "text":
@@ -106,14 +114,19 @@ func with(opts Options, tag string) (Options, error) {
 			opts.String = true
 		case "set":
 			opts.Set = true
+		case "zeronil":
+			opts.ZeroNil = true
+		case "ignorezero":
+			opts.IgnoreZero = true
 		}
 	}
 
 	return opts, nil
 }
 
-// New creates a new Hasher using the provided hash function constructor (e.g., fnv.New64a)
-// and options for tag parsing and behavior customization.
+// New creates a new Hasher that uses the given hash.Hash64 constructor and Options.
+//
+// The provided init function (e.g., fnv.New64a) must return a new hash.Hash64 instance.
 //
 // Example:
 //
@@ -151,20 +164,22 @@ func (c *container[H]) Reset() {
 	c.visitedTypes = c.visitedTypes[:0]
 }
 
-// Hasher hashes arbitrary Go values in a consistent, customizable way.
-// It is safe for concurrent use and caches reflection logic internally.
+// Hasher hashes arbitrary Go values consistently according to configurable Options.
+//
+// It caches reflection logic internally for performance, is safe for concurrent use,
+// and supports integration with marshaling interfaces (BinaryMarshaler, TextMarshaler, etc.).
 type Hasher[H hash.Hash64] struct {
 	defaultOpts Options
 	pool        *sync.Pool // Pool of H.
 	store       *sync.Map  // Map with key reflect.Type and value hashFunc[H]
 }
 
-// Hash computes a 64-bit hash of any Go value based on its contents.
+// Hash computes a 64-bit hash of the given value.
 //
-// It recursively walks the value using reflection, applying options
-// and interfaces (e.g., MarshalJSON) when applicable.
+// It traverses the value recursively, respecting struct tags and Options,
+// and applies interface-based customizations if available (e.g., MarshalJSON, HashWriter).
 //
-// Returns a deterministic uint64 value or an error if the type cannot be hashed.
+// Returns the resulting hash value or an error if the value cannot be hashed.
 func (h *Hasher[H]) Hash(value any) (uint64, error) {
 	c := h.pool.Get().(*container[H])
 	c.Reset()
@@ -203,6 +218,8 @@ var (
 	comma        = [1]byte{','}
 	openBracket  = [1]byte{'['}
 	closeBracket = [1]byte{']'}
+	byteTrue     = [1]byte{1}
+	byteFalse    = [1]byte{0}
 )
 
 func (h *Hasher[H]) hashByteSlice(value reflect.Value, c *container[H], _ Options) error {
@@ -246,21 +263,47 @@ func (h *Hasher[H]) hashInt(value reflect.Value, c *container[H], _ Options) err
 
 func (h *Hasher[H]) hashUint(value reflect.Value, c *container[H], _ Options) error {
 	binary.LittleEndian.PutUint64(c.buf[:], value.Uint())
+
 	_, err := c.hash.Write(c.buf[:])
 
 	return err
 }
 
 func (h *Hasher[H]) hashFloat(value reflect.Value, c *container[H], _ Options) error {
-	return binary.Write(c.hash, binary.LittleEndian, value.Float())
+	binary.LittleEndian.PutUint64(c.buf[:], math.Float64bits(value.Float()))
+
+	_, err := c.hash.Write(c.buf[:])
+
+	return err
 }
 
 func (h *Hasher[H]) hashComplex(value reflect.Value, c *container[H], _ Options) error {
-	return binary.Write(c.hash, binary.LittleEndian, value.Complex())
+	v := value.Complex()
+
+	binary.LittleEndian.PutUint64(c.buf[:], math.Float64bits(real(v)))
+
+	_, err := c.hash.Write(c.buf[:])
+	if err != nil {
+		return err
+	}
+
+	binary.LittleEndian.PutUint64(c.buf[:], math.Float64bits(imag(v)))
+
+	_, err = c.hash.Write(c.buf[:])
+
+	return err
 }
 
 func (h *Hasher[H]) hashBool(value reflect.Value, c *container[H], _ Options) error {
-	return binary.Write(c.hash, binary.LittleEndian, value.Bool())
+	var err error
+
+	if value.Bool() {
+		_, err = c.hash.Write(byteTrue[:])
+	} else {
+		_, err = c.hash.Write(byteFalse[:])
+	}
+
+	return err
 }
 
 func (h *Hasher[H]) hashArray(vhf hashFunc[H]) hashFunc[H] {
@@ -331,12 +374,11 @@ func (h *Hasher[H]) hashSlice(vhf hashFunc[H], opts Options) hashFunc[H] {
 
 		h.pool.Put(tmp)
 
-		err := binary.Write(c.hash, binary.LittleEndian, result)
-		if err != nil {
-			return err
-		}
+		binary.LittleEndian.PutUint64(c.buf[:], result)
 
-		return nil
+		_, err := c.hash.Write(c.buf[:])
+
+		return err
 	}
 }
 
@@ -354,7 +396,7 @@ func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 		keys := value.MapKeys()
 		for _, key := range keys {
 			val := value.MapIndex(key)
-			if !val.IsValid() || val.IsZero() {
+			if !val.IsValid() {
 				continue
 			}
 
@@ -385,7 +427,11 @@ func (h *Hasher[H]) hashMap(khf, vhf hashFunc[H]) hashFunc[H] {
 
 		h.pool.Put(tmp)
 
-		return binary.Write(c.hash, binary.LittleEndian, result)
+		binary.LittleEndian.PutUint64(c.buf[:], result)
+
+		_, err := c.hash.Write(c.buf[:])
+
+		return err
 	}
 }
 
@@ -406,13 +452,23 @@ func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
 			return err
 		}
 
-		for i, sf := range sfs {
-			if i > 0 {
+		first := true
+
+		for _, sf := range sfs {
+			fv := value.Field(sf.idx)
+
+			if opts.IgnoreZero && fv.IsZero() {
+				continue
+			}
+
+			if !first {
 				_, err = c.hash.Write(comma[:])
 				if err != nil {
 					return err
 				}
 			}
+
+			first = false
 
 			_, err = c.hash.Write(sf.name)
 			if err != nil {
@@ -424,7 +480,7 @@ func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
 				return err
 			}
 
-			if err = sf.hf(value.Field(sf.idx), c, opts); err != nil {
+			if err = sf.hf(fv, c, opts); err != nil {
 				return err
 			}
 		}
@@ -435,14 +491,71 @@ func (h *Hasher[H]) hashStruct(sfs []structField[H]) hashFunc[H] {
 	}
 }
 
-type setPair struct {
-	key reflect.Value
-	val reflect.Value
-}
-
 func (h *Hasher[H]) hashSeq2(value reflect.Value, c *container[H], opts Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
+	}
+
+	if opts.Set {
+		var (
+			result uint64
+			tmp    = h.pool.Get().(*container[H])
+			err    error
+		)
+
+		var khf, vhf hashFunc[H]
+
+		for k, v := range value.Seq2() {
+			if !k.IsValid() || !v.IsValid() {
+				continue
+			}
+
+			tmp.Reset()
+
+			if khf == nil || vhf == nil {
+				khf, err = h.makeHashFunc(k.Type(), tmp, opts)
+				if err != nil {
+					h.pool.Put(tmp)
+
+					return err
+				}
+
+				vhf, err = h.makeHashFunc(v.Type(), tmp, opts)
+				if err != nil {
+					h.pool.Put(tmp)
+
+					return err
+				}
+			}
+
+			if err = khf(k, tmp, opts); err != nil {
+				h.pool.Put(tmp)
+
+				return err
+			}
+
+			if _, err = tmp.hash.Write(colon[:]); err != nil {
+				h.pool.Put(tmp)
+
+				return err
+			}
+
+			if err = vhf(v, tmp, opts); err != nil {
+				h.pool.Put(tmp)
+
+				return err
+			}
+
+			result ^= tmp.hash.Sum64()
+		}
+
+		h.pool.Put(tmp)
+
+		binary.LittleEndian.PutUint64(c.buf[:], result)
+
+		_, err = c.hash.Write(c.buf[:])
+
+		return err
 	}
 
 	_, err := c.hash.Write(openBrace[:])
@@ -450,49 +563,45 @@ func (h *Hasher[H]) hashSeq2(value reflect.Value, c *container[H], opts Options)
 		return err
 	}
 
-	var pairs []setPair
+	var (
+		khf, vhf hashFunc[H]
+		first    = true
+	)
 
-	for key, val := range value.Seq2() {
-		if key.IsValid() && val.IsValid() {
-			pairs = append(pairs, setPair{
-				key: key,
-				val: val,
-			})
+	for k, v := range value.Seq2() {
+		if !k.IsValid() || !v.IsValid() {
+			continue
 		}
-	}
 
-	if len(pairs) == 0 {
-		return nil
-	}
+		if !first {
+			if _, err := c.hash.Write(comma[:]); err != nil {
+				return err
+			}
+		}
 
-	khf, err := h.makeHashFunc(pairs[0].key.Type(), c, opts)
-	if err != nil {
-		return err
-	}
+		first = false
 
-	vhf, err := h.makeHashFunc(pairs[0].val.Type(), c, opts)
-	if err != nil {
-		return err
-	}
+		if khf == nil || vhf == nil {
+			khf, err = h.makeHashFunc(k.Type(), c, opts)
+			if err != nil {
+				return err
+			}
 
-	for i, pair := range pairs {
-		if i > 0 {
-			_, err = c.hash.Write(comma[:])
+			vhf, err = h.makeHashFunc(v.Type(), c, opts)
 			if err != nil {
 				return err
 			}
 		}
 
-		if err = khf(pair.key, c, opts); err != nil {
+		if err = khf(k, c, opts); err != nil {
 			return err
 		}
 
-		_, err = c.hash.Write(colon[:])
-		if err != nil {
+		if _, err = c.hash.Write(colon[:]); err != nil {
 			return err
 		}
 
-		if err = vhf(pair.val, c, opts); err != nil {
+		if err = vhf(v, c, opts); err != nil {
 			return err
 		}
 	}
@@ -505,6 +614,45 @@ func (h *Hasher[H]) hashSeq2(value reflect.Value, c *container[H], opts Options)
 func (h *Hasher[H]) hashSeq(value reflect.Value, c *container[H], opts Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
+	}
+
+	if opts.Set {
+		var (
+			result uint64
+			err    error
+			tmp    = h.pool.Get().(*container[H])
+		)
+
+		var vhf hashFunc[H]
+
+		for v := range value.Seq() {
+			if vhf == nil {
+				vhf, err = h.makeHashFunc(v.Type(), tmp, opts)
+				if err != nil {
+					h.pool.Put(tmp)
+
+					return err
+				}
+			}
+
+			tmp.Reset()
+
+			if err = vhf(v, tmp, opts); err != nil {
+				h.pool.Put(tmp)
+
+				return err
+			}
+
+			result ^= tmp.hash.Sum64()
+		}
+
+		h.pool.Put(tmp)
+
+		binary.LittleEndian.PutUint64(c.buf[:], result)
+
+		_, err = c.hash.Write(c.buf[:])
+
+		return err
 	}
 
 	_, err := c.hash.Write(openBracket[:])
@@ -537,19 +685,12 @@ func (h *Hasher[H]) hashSeq(value reflect.Value, c *container[H], opts Options) 
 	return err
 }
 
-func (h *Hasher[H]) hashInterfaceHashable(value reflect.Value, c *container[H], _ Options) error {
+func (h *Hasher[H]) hashInterfaceHashWriter(value reflect.Value, c *container[H], _ Options) error {
 	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
 
-	v, err := value.Interface().(Hashable).Hash()
-	if err != nil {
-		return err
-	}
-
-	_, err = c.hash.Write(v)
-
-	return err
+	return value.Interface().(HashWriter).WriteHash(c.hash)
 }
 
 func (h *Hasher[H]) hashInterfaceBinary(value reflect.Value, c *container[H], _ Options) error {
@@ -607,8 +748,21 @@ func (h *Hasher[H]) hashInterfaceStringer(value reflect.Value, c *container[H], 
 	return err
 }
 
+func (h *Hasher[H]) wrapType(hf hashFunc[H]) hashFunc[H] {
+	return func(value reflect.Value, c *container[H], opts Options) error {
+		if opts.Marker {
+			_, err := c.hash.Write(stringToBytes(value.Type().String()))
+			if err != nil {
+				return err
+			}
+		}
+
+		return hf(value, c, opts)
+	}
+}
+
 var (
-	hashableType        = reflect.TypeFor[Hashable]()
+	hashWriterType      = reflect.TypeFor[HashWriter]()
 	binaryMarshalerType = reflect.TypeFor[encoding.BinaryMarshaler]()
 	textMarshalerType   = reflect.TypeFor[encoding.TextMarshaler]()
 	jsonMarshalerType   = reflect.TypeFor[json.Marshaler]()
@@ -629,32 +783,32 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 	c.visitedTypes = append(c.visitedTypes, t)
 
 	switch {
-	case t.Implements(hashableType):
-		hf = h.hashInterfaceHashable
+	case t.Implements(hashWriterType):
+		hf = h.wrapType(h.hashInterfaceHashWriter)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case opts.Binary && t.Implements(binaryMarshalerType):
-		hf = h.hashInterfaceBinary
+		hf = h.wrapType(h.hashInterfaceBinary)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case opts.Text && t.Implements(textMarshalerType):
-		hf = h.hashInterfaceText
+		hf = h.wrapType(h.hashInterfaceText)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case opts.JSON && t.Implements(jsonMarshalerType):
-		hf = h.hashInterfaceJSON
+		hf = h.wrapType(h.hashInterfaceJSON)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case opts.String && t.Implements(stringerType):
-		hf = h.hashInterfaceStringer
+		hf = h.wrapType(h.hashInterfaceStringer)
 
 		h.store.Store(t, hf)
 
@@ -663,15 +817,25 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 
 	switch t.Kind() {
 	case reflect.Interface:
-		return h.hashInterface, nil
+		hf = h.wrapType(h.hashInterface)
+
+		h.store.Store(t, hf)
+
+		return hf, nil
 	case reflect.Pointer:
 		hasher, err := h.makeHashFunc(t.Elem(), c, opts)
 		if err != nil {
 			return nil, err
 		}
 
-		hf = func(value reflect.Value, c *container[H], opts Options) error {
+		hf = h.wrapType(func(value reflect.Value, c *container[H], opts Options) error {
 			if !value.IsValid() || value.IsZero() {
+				if opts.ZeroNil {
+					zero := reflect.Zero(t.Elem())
+
+					return hasher(zero, c, opts)
+				}
+
 				return nil
 			}
 
@@ -685,43 +849,43 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 			}
 
 			return hasher(value.Elem(), c, opts)
-		}
+		})
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case reflect.String:
-		hf = h.hashString
+		hf = h.wrapType(h.hashString)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		hf = h.hashInt
+		hf = h.wrapType(h.hashInt)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		hf = h.hashUint
+		hf = h.wrapType(h.hashUint)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case reflect.Float32, reflect.Float64:
-		hf = h.hashFloat
+		hf = h.wrapType(h.hashFloat)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case reflect.Complex64, reflect.Complex128:
-		hf = h.hashComplex
+		hf = h.wrapType(h.hashComplex)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	case reflect.Bool:
-		hf = h.hashBool
+		hf = h.wrapType(h.hashBool)
 
 		h.store.Store(t, hf)
 
@@ -732,7 +896,7 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 			return nil, err
 		}
 
-		hf = h.hashArray(vhf)
+		hf = h.wrapType(h.hashArray(vhf))
 
 		h.store.Store(t, hf)
 
@@ -741,7 +905,11 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 		elem := t.Elem()
 
 		if elem.Kind() == reflect.Uint8 {
-			return h.hashByteSlice, nil
+			hf = h.wrapType(h.hashByteSlice)
+
+			h.store.Store(t, hf)
+
+			return hf, nil
 		}
 
 		vhf, err := h.makeHashFunc(elem, c, opts)
@@ -749,7 +917,7 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 			return nil, err
 		}
 
-		hf = h.hashSlice(vhf, opts)
+		hf = h.wrapType(h.hashSlice(vhf, opts))
 
 		h.store.Store(t, hf)
 
@@ -765,7 +933,7 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 			return nil, err
 		}
 
-		hf = h.hashMap(khf, vhf)
+		hf = h.wrapType(h.hashMap(khf, vhf))
 
 		h.store.Store(t, hf)
 
@@ -802,7 +970,7 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 			})
 		}
 
-		hf = h.hashStruct(sfs)
+		hf = h.wrapType(h.hashStruct(sfs))
 
 		h.store.Store(t, hf)
 
@@ -810,7 +978,7 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 	}
 
 	if t.CanSeq2() {
-		hf = h.hashSeq2
+		hf = h.wrapType(h.hashSeq2)
 
 		h.store.Store(t, hf)
 
@@ -818,22 +986,14 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 	}
 
 	if t.CanSeq() {
-		hf = h.hashSeq
+		hf = h.wrapType(h.hashSeq)
 
 		h.store.Store(t, hf)
 
 		return hf, nil
 	}
 
-	if opts.JSON {
-		hf = h.hashInterfaceJSON
-
-		h.store.Store(t, hf)
-
-		return hf, nil
-	}
-
-	return nil, fmt.Errorf("datahash: unsupported type: %s: enable Options.JSON for fallback serialization", t.String())
+	return nil, fmt.Errorf("datahash: unsupported type: %s (missing HashWriter or marshaling interface)", t.String())
 }
 
 func stringToBytes(s string) []byte {

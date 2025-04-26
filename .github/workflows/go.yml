@@ -1,19 +1,18 @@
-name: Go
+name: Go CI
 
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
-  check:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -25,9 +24,22 @@ jobs:
         with:
           version: v2.1.1
 
-      - name: Run Tests and Generate Coverage
+  test:
+    name: Unit Tests & Coverage
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Run Tests with Coverage
         run: |
-          go test -v ./... -covermode=count -coverprofile=coverage.out
+          go test -race -covermode=count -coverprofile=coverage.out -v ./...
           go tool cover -func=coverage.out -o=coverage.out
 
       - name: Generate Coverage Badge
@@ -52,9 +64,26 @@ jobs:
           git add README.md
           git commit -m "chore: update coverage badge"
 
-      - name: Push Changes to main
+      - name: Push Changes
         if: steps.verify-changed-files.outputs.files_changed == 'true'
         uses: ad-m/github-push-action@master
         with:
           github_token: ${{ secrets.ACTIONS_PAT }}
           branch: main
+
+  fuzz:
+    name: Fuzz Testing
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Run Fuzz Tests (short)
+        run: |
+          go test -fuzz=Fuzz -fuzztime=30s ./...

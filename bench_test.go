@@ -47,46 +47,92 @@ func getTestValue() BenchStruct {
 	}
 }
 
-func BenchmarkDatahash(b *testing.B) {
-	hasher := datahash.New(fnv.New64a, datahash.Options{})
+func BenchmarkHashers(b *testing.B) {
 	val := getTestValue()
 
-	b.ResetTimer()
-	for b.Loop() {
-		_, err := hasher.Hash(val)
-		if err != nil {
-			b.Fatal(err)
+	b.Run("Datahash+FNV (Marker=false)", func(b *testing.B) {
+		hasher := datahash.New(fnv.New64a, datahash.Options{
+			Marker: false,
+		})
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := hasher.Hash(val)
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
-	}
-}
+	})
 
-func BenchmarkHashstructure(b *testing.B) {
-	val := getTestValue()
+	b.Run("Datahash+FNV (Marker=true)", func(b *testing.B) {
+		hasher := datahash.New(fnv.New64a, datahash.Options{
+			Marker: true,
+		})
 
-	b.ResetTimer()
-	for b.Loop() {
-		_, err := hashstructure.Hash(val, hashstructure.FormatV2, nil)
-		if err != nil {
-			b.Fatal(err)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := hasher.Hash(val)
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
-	}
-}
+	})
 
-func BenchmarkJSON(b *testing.B) {
-	val := getTestValue()
+	b.Run("Hashstructure+FNV", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := hashstructure.Hash(val, hashstructure.FormatV2, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 
-	hasher := fnv.New64a()
+	b.Run("JSON+FNV", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hasher := fnv.New64a()
 
-	b.ResetTimer()
-	for b.Loop() {
+			data, err := json.Marshal(val)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			_, err = hasher.Write(data)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			_ = hasher.Sum64()
+		}
+	})
+
+	b.Run("JSON only", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := json.Marshal(val)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("FNV only", func(b *testing.B) {
 		data, err := json.Marshal(val)
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		_, err = hasher.Write(data)
-		if err != nil {
-			b.Fatal(err)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hasher := fnv.New64a()
+
+			_, err := hasher.Write(data)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			_ = hasher.Sum64()
 		}
-	}
+	})
 }
