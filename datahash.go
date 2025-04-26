@@ -54,7 +54,6 @@
 // Notes:
 //   - Use `datahash:"-"` to exclude a field from hashing.
 //   - Struct fields are hashed in their declared order.
-//   - Only exported fields are considered.
 //   - For custom hashing behavior, implement the HashWriter interface.
 package datahash
 
