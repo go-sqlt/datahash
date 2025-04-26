@@ -13,7 +13,7 @@ The package is highly customizable, efficient, and integrates with standard Go i
 - Consistent 64-bit hashing of any Go value.
 - Handles cyclic data structures safely (pointer tracking).
 - Supports struct tags and per-field options.
-- Slices, iter.Seq, iter.Seq2 can be treated as unordered sets (like Maps).
+- Slices, iter.Seq, iter.Seq2 can be treated as unordered sets (like maps).
 - Integrates with: encoding.BinaryMarshaler, encoding.TextMarshaler, encoding/json.Marshaler, fmt.Stringer.
 - Supports custom hash logic via datahash.HashWriter interface.
 - High performance: type caching and hasher pooling.
@@ -78,7 +78,6 @@ func main() {
 
 ## Notes
 
-- Only exported fields are considered.
 - Struct fields are hashed in their declared order.
 - Maps and sets are folded using XOR for order-independence.
 - Cyclic pointers are detected and skipped safely.
@@ -87,18 +86,19 @@ func main() {
 
 ## Benchmark
 
+This benchmark demonstrates that datahash is faster and more memory-efficient than 
+alternatives like hashstructure or JSON marshaling with FNV hashing:
+
 ```go
-go test -bench=. -benchmem                                                  
+go test -bench=. -benchmem
 goos: darwin
 goarch: arm64
 pkg: github.com/go-sqlt/datahash
 cpu: Apple M3 Pro
-BenchmarkHashers/Datahash+FNV_(Marker=false)-12                  1988764               573.8 ns/op           258 B/op          8 allocs/op
-BenchmarkHashers/Datahash+FNV_(Marker=true)-12                   1672119               716.8 ns/op           258 B/op          8 allocs/op
-BenchmarkHashers/Hashstructure+FNV-12                             346440              3367 ns/op            2544 B/op        159 allocs/op
-BenchmarkHashers/JSON+FNV-12                                     1256473               954.3 ns/op           516 B/op          8 allocs/op
-BenchmarkHashers/JSON_only-12                                    1847144               654.8 ns/op           516 B/op          8 allocs/op
-BenchmarkHashers/FNV_only-12                                     4136947               289.7 ns/op             0 B/op          0 allocs/op
+BenchmarkHashers/Datahash+FNV/Marker=false-12            1977358               587.1 ns/op           258 B/op          8 allocs/op
+BenchmarkHashers/Datahash+FNV/Marker=true-12             1617760               740.8 ns/op           258 B/op          8 allocs/op
+BenchmarkHashers/Hashstructure+FNV-12                     349068              3370 ns/op            2544 B/op        159 allocs/op
+BenchmarkHashers/JSON+FNV-12                             1245579               966.8 ns/op           516 B/op          8 allocs/op
 PASS
-ok      github.com/go-sqlt/datahash     10.594s
+ok      github.com/go-sqlt/datahash     4.947s
 ```

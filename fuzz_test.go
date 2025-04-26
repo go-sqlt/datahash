@@ -10,7 +10,7 @@ import (
 )
 
 func generateRandomValue(r *rand.Rand, depth int) any {
-	if depth > 3 { // Limit recursion depth
+	if depth > 3 {
 		return r.IntN(1000)
 	}
 
@@ -22,7 +22,7 @@ func generateRandomValue(r *rand.Rand, depth int) any {
 	case 2:
 		return r.IntN(2) == 0
 	case 3:
-		return randomString(r, 5+r.IntN(10)) // <- fixed
+		return randomString(r, 5+r.IntN(10))
 	case 4:
 		n := r.IntN(5)
 		arr := make([]int, n)
@@ -68,7 +68,7 @@ func FuzzHash(f *testing.F) {
 	hasher := datahash.New(fnv.New64a, datahash.Options{})
 	r := rand.New(rand.NewPCG(1, 2))
 
-	seen := make(map[uint64]any) // hash -> value
+	seen := make(map[uint64]any)
 
 	f.Add("seed")
 
