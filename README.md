@@ -2,7 +2,7 @@
 
 [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white)](https://pkg.go.dev/github.com/go-sqlt/datahash)
 [![GitHub tag (latest SemVer)](https://img.shields.io/github/tag/go-sqlt/datahash.svg?style=social)](https://github.com/go-sqlt/datahash/tags)
-[![Coverage](https://img.shields.io/badge/Coverage-79.2%25-brightgreen)](https://github.com/go-sqlt/datahash/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-79.6%25-brightgreen)](https://github.com/go-sqlt/datahash/actions)
 
 datahash provides a hashing system for arbitrary Go values with zero dependencies.  
 It produces consistent 64-bit hashes by recursively traversing Go data structures.  
