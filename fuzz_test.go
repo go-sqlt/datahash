@@ -1,64 +1,104 @@
 package datahash_test
 
 import (
+	"encoding/json"
 	"hash/fnv"
+	"math/big"
 	"math/rand/v2"
+	"net/url"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/go-sqlt/datahash"
 )
 
 func generateRandomValue(r *rand.Rand, depth int) any {
-	if depth > 3 {
+	if depth > 4 {
 		return r.IntN(1000)
 	}
 
-	switch r.IntN(8) {
+	switch r.IntN(14) {
 	case 0:
-		return r.IntN(1000)
+		return r.IntN(1_000_000)
 	case 1:
 		return r.Float64()
 	case 2:
 		return r.IntN(2) == 0
 	case 3:
-		return randomString(r, 5+r.IntN(10))
+		return randomString(r, 3+r.IntN(20))
 	case 4:
 		n := r.IntN(5)
 		arr := make([]int, n)
 		for i := range arr {
-			arr[i] = r.IntN(1000)
+			arr[i] = r.IntN(5000)
 		}
 		return arr
 	case 5:
-		m := make(map[string]int)
 		n := r.IntN(5)
-		for range n {
-			m[randomString(r, 5+r.IntN(5))] = r.IntN(1000)
+		m := make(map[string]float64, n)
+		for i := 0; i < n; i++ {
+			m[randomString(r, 3+r.IntN(5))] = r.Float64()
 		}
 		return m
 	case 6:
-		type Nested struct {
-			A int
-			B float64
-			C []string
-		}
-		return Nested{
-			A: r.IntN(100),
-			B: r.Float64(),
-			C: []string{
-				randomString(r, 5+r.IntN(5)),
-				randomString(r, 5+r.IntN(5)),
-			},
+		return struct {
+			A string
+			B int
+			C []byte
+		}{
+			A: randomString(r, 5+r.IntN(10)),
+			B: r.IntN(1000),
+			C: []byte(randomString(r, 5)),
 		}
 	case 7:
 		return &struct {
-			X int
-			Y []byte
+			X bool
+			Y *big.Int
 		}{
-			X: r.IntN(100),
-			Y: []byte(randomString(r, 10)),
+			X: r.IntN(2) == 0,
+			Y: big.NewInt(r.Int64N(1e6)),
 		}
+	case 8:
+		u := &url.URL{
+			Scheme:   "https",
+			Host:     "example.com",
+			Path:     "/path/" + randomString(r, 3),
+			RawQuery: "query=" + randomString(r, 5),
+		}
+		return u
+	case 9:
+		type Nested struct {
+			ID   int
+			Name string
+			Data []float64
+		}
+		return Nested{
+			ID:   r.IntN(1000),
+			Name: randomString(r, 10),
+			Data: []float64{r.Float64(), r.Float64()},
+		}
+	case 10:
+		// Array of strings
+		var arr [4]string
+		for i := range arr {
+			arr[i] = randomString(r, 3+r.IntN(5))
+		}
+		return arr
+	case 11:
+		return []*int{ptr(r.IntN(10)), ptr(r.IntN(20)), nil}
+	case 12:
+		// Random JSON object
+		obj := map[string]any{
+			"foo": randomString(r, 5),
+			"bar": r.IntN(100),
+			"baz": []int{r.IntN(5), r.IntN(10)},
+		}
+		b, _ := json.Marshal(obj)
+		return b
+	case 13:
+		// Recursively nested random
+		return generateRandomValue(r, depth+1)
 	default:
 		return nil
 	}
@@ -66,7 +106,7 @@ func generateRandomValue(r *rand.Rand, depth int) any {
 
 func FuzzHash(f *testing.F) {
 	hasher := datahash.New(fnv.New64a, datahash.Options{})
-	r := rand.New(rand.NewPCG(1, 2))
+	r := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 42))
 
 	seen := make(map[uint64]any)
 
@@ -108,10 +148,14 @@ func valuesAreZero(v any) bool {
 }
 
 func randomString(r *rand.Rand, length int) string {
-	letters := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
 	for i := range b {
 		b[i] = letters[r.IntN(len(letters))]
 	}
 	return string(b)
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }

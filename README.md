@@ -90,15 +90,15 @@ This benchmark demonstrates that datahash is faster and more memory-efficient th
 alternatives like hashstructure or JSON marshaling with FNV hashing:
 
 ```go
-go test -bench=. -benchmem
+go test -bench=. -benchmem                                         
 goos: darwin
 goarch: arm64
 pkg: github.com/go-sqlt/datahash
 cpu: Apple M3 Pro
-BenchmarkHashers/Datahash+FNV/Marker=false-12            1977358               587.1 ns/op           258 B/op          8 allocs/op
-BenchmarkHashers/Datahash+FNV/Marker=true-12             1617760               740.8 ns/op           258 B/op          8 allocs/op
-BenchmarkHashers/Hashstructure+FNV-12                     349068              3370 ns/op            2544 B/op        159 allocs/op
-BenchmarkHashers/JSON+FNV-12                             1245579               966.8 ns/op           516 B/op          8 allocs/op
+BenchmarkHashers/Datahash+FNV/Marker=false-12            1748768               700.2 ns/op           258 B/op          8 allocs/op
+BenchmarkHashers/Datahash+FNV/Marker=true-12             1350974               884.5 ns/op           258 B/op          8 allocs/op
+BenchmarkHashers/Hashstructure+FNV-12                     332823              3528 ns/op            2544 B/op        159 allocs/op
+BenchmarkHashers/JSON+FNV-12                             1203392               998.3 ns/op           516 B/op          8 allocs/op
 PASS
-ok      github.com/go-sqlt/datahash     4.947s
+ok      github.com/go-sqlt/datahash     4.951s
 ```

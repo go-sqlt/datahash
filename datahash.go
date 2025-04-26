@@ -944,10 +944,6 @@ func (h *Hasher[H]) makeHashFunc(t reflect.Type, c *container[H], opts Options) 
 		for i := range t.NumField() {
 			sf := t.Field(i)
 
-			if !sf.IsExported() {
-				continue
-			}
-
 			tag := sf.Tag.Get(opts.Tag)
 			if tag == "-" {
 				continue
