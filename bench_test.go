@@ -6,107 +6,141 @@ import (
 	"math/big"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/go-sqlt/datahash"
 	gohugoio "github.com/gohugoio/hashstructure"
 	mitchellh "github.com/mitchellh/hashstructure/v2"
 )
 
-type Nested struct {
-	Score float64
-	Flags map[string]bool
+// Beispiele für verschiedene Typen
+
+type SimpleStruct struct {
+	Name string
+	Age  int
 }
 
-type BenchStruct struct {
-	ID     int
-	Name   string
-	Tags   []string
-	Nested Nested
-	Big    *big.Int
-	URL    *url.URL `datahash:"binary"`
+type ComplexStruct struct {
+	ID      int
+	Created time.Time
+	Details map[string]*big.Int
+	Tags    []string
+	URL     *url.URL `datahash:"binary"`
 }
 
-func getTestValue() BenchStruct {
+func getSimpleStruct() SimpleStruct {
+	return SimpleStruct{
+		Name: "Alice",
+		Age:  30,
+	}
+}
+
+func getComplexStruct() ComplexStruct {
 	u, _ := url.Parse("https://example.com/path?query=value")
-	return BenchStruct{
-		ID:   123,
-		Name: "Example",
-		Tags: []string{"go", "hash", "test"},
-		Nested: Nested{
-			Score: 99.5,
-			Flags: map[string]bool{
-				"fast":  true,
-				"cheap": false,
-			},
+	return ComplexStruct{
+		ID:      123456,
+		Created: time.Now(),
+		Details: map[string]*big.Int{
+			"one": big.NewInt(1),
+			"two": big.NewInt(2),
 		},
-		Big: big.NewInt(10),
-		URL: u,
+		Tags: []string{"go", "benchmark", "hash"},
+		URL:  u,
 	}
 }
 
 func BenchmarkHashers(b *testing.B) {
-	val := getTestValue()
+	// Verschiedene Werte
+	simple := getSimpleStruct()
+	complex := getComplexStruct()
+	primitive := 123456789
+	stringValue := "Hello, World!"
+	mapValue := map[string]any{
+		"key1": "value1",
+		"key2": 42,
+		"key3": []int{1, 2, 3},
+	}
 
-	b.Run("Datahash+FNV/Marker=false", func(b *testing.B) {
-		hasher := datahash.New(fnv.New64a, datahash.Options{Marker: false})
+	cases := []struct {
+		name string
+		val  any
+	}{
+		{"Primitive int", primitive},
+		{"String value", stringValue},
+		{"Simple struct", simple},
+		{"Complex struct", complex},
+		{"Map value", mapValue},
+	}
 
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			if _, err := hasher.Hash(val); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			b.Run("Datahash+FNV/Marker=false/", func(b *testing.B) {
+				hasher := datahash.New(fnv.New64a, datahash.Options{Marker: false, IgnoreZero: true})
 
-	b.Run("Datahash+FNV/Marker=true", func(b *testing.B) {
-		hasher := datahash.New(fnv.New64a, datahash.Options{Marker: true})
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if _, err := hasher.Hash(c.val); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
 
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			if _, err := hasher.Hash(val); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+			b.Run("Datahash+FNV/Marker=true/", func(b *testing.B) {
+				hasher := datahash.New(fnv.New64a, datahash.Options{Marker: true, IgnoreZero: true})
 
-	b.Run("Mitchellh/Hashstructure+FNV", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			if _, err := mitchellh.Hash(val, mitchellh.FormatV2, nil); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if _, err := hasher.Hash(c.val); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
 
-	b.Run("Gohugoio/Hashstructure+FNV", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			if _, err := gohugoio.Hash(val, nil); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+			b.Run("Mitchellh/Hashstructure+FNV/", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if _, err := mitchellh.Hash(c.val, mitchellh.FormatV2, &mitchellh.HashOptions{
+						IgnoreZeroValue: true,
+					}); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
 
-	b.Run("JSON+FNV", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
+			b.Run("Gohugoio/Hashstructure+FNV/", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if _, err := gohugoio.Hash(c.val, &gohugoio.HashOptions{
+						IgnoreZeroValue: true,
+					}); err != nil {
+						b.Fatal(err)
+					}
+					b.N--
+				}
+			})
 
-		hasher := fnv.New64a()
+			b.Run("JSON+FNV/", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
 
-		for b.Loop() {
-			data, err := json.Marshal(val)
-			if err != nil {
-				b.Fatal(err)
-			}
+				for b.Loop() {
+					hasher := fnv.New64a()
 
-			if _, err = hasher.Write(data); err != nil {
-				b.Fatal(err)
-			}
-			_ = hasher.Sum64()
-		}
-	})
+					data, err := json.Marshal(c.val)
+					if err != nil {
+						b.Fatal(err)
+					}
+
+					if _, err = hasher.Write(data); err != nil {
+						b.Fatal(err)
+					}
+					_ = hasher.Sum64()
+				}
+			})
+		})
+	}
 }
