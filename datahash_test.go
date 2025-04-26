@@ -121,7 +121,6 @@ func TestHasher_Hash(t *testing.T) {
 			A int
 			B int
 		}{A: 1, B: 0}, datahash.Options{IgnoreZero: true})},
-		{"marker enabled", 123, datahash.Options{Marker: true}, mustHash(t, 123, datahash.Options{Marker: true})},
 		{"complex128 value", complex(1.5, -2.5), datahash.Options{}, mustHash(t, complex(1.5, -2.5), datahash.Options{})},
 		{"seq2 slice type", slices.All([]int{10, 20, 30}), datahash.Options{}, mustHash(t, slices.All([]int{10, 20, 30}), datahash.Options{})},
 		{"seq slice type", slices.Values([]int{10, 20, 30}), datahash.Options{}, mustHash(t, slices.Values([]int{10, 20, 30}), datahash.Options{})},

@@ -65,17 +65,17 @@ func BenchmarkHashers(b *testing.B) {
 		name string
 		val  any
 	}{
-		{"Primitive int", primitive},
-		{"String value", stringValue},
-		{"Simple struct", simple},
+		{"Primitive int ", primitive},
+		{"String value  ", stringValue},
+		{"Simple struct ", simple},
 		{"Complex struct", complex},
-		{"Map value", mapValue},
+		{"Map value     ", mapValue},
 	}
 
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			b.Run("Datahash+FNV/Marker=false/", func(b *testing.B) {
-				hasher := datahash.New(fnv.New64a, datahash.Options{Marker: false, IgnoreZero: true})
+			b.Run("Datahash               ", func(b *testing.B) {
+				hasher := datahash.New(fnv.New64a, datahash.Options{IgnoreZero: true})
 
 				b.ReportAllocs()
 				b.ResetTimer()
@@ -86,19 +86,7 @@ func BenchmarkHashers(b *testing.B) {
 				}
 			})
 
-			b.Run("Datahash+FNV/Marker=true/", func(b *testing.B) {
-				hasher := datahash.New(fnv.New64a, datahash.Options{Marker: true, IgnoreZero: true})
-
-				b.ReportAllocs()
-				b.ResetTimer()
-				for b.Loop() {
-					if _, err := hasher.Hash(c.val); err != nil {
-						b.Fatal(err)
-					}
-				}
-			})
-
-			b.Run("Mitchellh/Hashstructure+FNV/", func(b *testing.B) {
+			b.Run("Mitchellh/Hashstructure", func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
@@ -110,7 +98,7 @@ func BenchmarkHashers(b *testing.B) {
 				}
 			})
 
-			b.Run("Gohugoio/Hashstructure+FNV/", func(b *testing.B) {
+			b.Run("Gohugoio/Hashstructure ", func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
@@ -123,7 +111,7 @@ func BenchmarkHashers(b *testing.B) {
 				}
 			})
 
-			b.Run("JSON+FNV/", func(b *testing.B) {
+			b.Run("JSON                   ", func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 
