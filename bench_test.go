@@ -75,7 +75,7 @@ func BenchmarkHashers(b *testing.B) {
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
 			b.Run("Datahash               ", func(b *testing.B) {
-				hasher := datahash.New(fnv.New64a, datahash.Options{IgnoreZero: true})
+				hasher := datahash.New(fnv.New64a, &datahash.Options{IgnoreZero: true})
 
 				b.ReportAllocs()
 				b.ResetTimer()

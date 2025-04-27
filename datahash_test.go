@@ -1,6 +1,7 @@
 package datahash_test
 
 import (
+	"bytes"
 	"fmt"
 	"hash"
 	"hash/fnv"
@@ -14,7 +15,7 @@ import (
 type testCase struct {
 	name     string
 	value    any
-	options  datahash.Options
+	options  *datahash.Options
 	expected uint64
 }
 
@@ -62,72 +63,81 @@ func (j jsonMarshaler) MarshalJSON() ([]byte, error) {
 
 func TestHasher_Hash(t *testing.T) {
 	tests := []testCase{
-		{"int", 42, datahash.Options{}, mustHash(t, 42, datahash.Options{})},
-		{"uint", uint64(42), datahash.Options{}, mustHash(t, uint64(42), datahash.Options{})},
-		{"bool", true, datahash.Options{}, mustHash(t, true, datahash.Options{})},
-		{"float64", 3.14, datahash.Options{}, mustHash(t, 3.14, datahash.Options{})},
-		{"string", "hello", datahash.Options{}, mustHash(t, "hello", datahash.Options{})},
+		{"int", 42, &datahash.Options{}, mustHash(t, 42, &datahash.Options{})},
+		{"uint", uint64(42), &datahash.Options{}, mustHash(t, uint64(42), &datahash.Options{})},
+		{"bool", true, &datahash.Options{}, mustHash(t, true, &datahash.Options{})},
+		{"float64", 3.14, &datahash.Options{}, mustHash(t, 3.14, &datahash.Options{})},
+		{"string", "hello", &datahash.Options{}, mustHash(t, "hello", &datahash.Options{})},
 		{"ignored struct field", struct {
 			Secret string `datahash:"-"`
 			X      int
-		}{"hidden", 1}, datahash.Options{}, mustHash(t, struct {
+		}{"hidden", 1}, &datahash.Options{}, mustHash(t, struct {
 			Secret string `datahash:"-"`
 			X      int
-		}{"whatever", 1}, datahash.Options{})},
+		}{"whatever", 1}, &datahash.Options{})},
 		{"json tag", struct {
 			V any `datahash:"json"`
-		}{[]int{1, 2, 3}}, datahash.Options{}, mustHash(t, struct {
+		}{[]int{1, 2, 3}}, &datahash.Options{}, mustHash(t, struct {
 			V any `datahash:"json"`
-		}{[]int{1, 2, 3}}, datahash.Options{})},
+		}{[]int{1, 2, 3}}, &datahash.Options{})},
 
 		{"stringer field", struct {
 			V stringerType `datahash:"string"`
-		}{stringerType{V: 9}}, datahash.Options{}, mustHash(t, struct {
+		}{stringerType{V: 9}}, &datahash.Options{}, mustHash(t, struct {
 			V stringerType `datahash:"string"`
-		}{stringerType{V: 9}}, datahash.Options{})},
+		}{stringerType{V: 9}}, &datahash.Options{})},
 		{"binary field", struct {
 			V binaryMarshaler `datahash:"binary"`
-		}{binaryMarshaler{N: 255}}, datahash.Options{}, mustHash(t, struct {
+		}{binaryMarshaler{N: 255}}, &datahash.Options{}, mustHash(t, struct {
 			V binaryMarshaler `datahash:"binary"`
-		}{binaryMarshaler{N: 255}}, datahash.Options{})},
-		{"slice vs set", []int{1, 2, 3}, datahash.Options{Set: true}, mustHash(t, []int{3, 2, 1}, datahash.Options{Set: true})},
-		{"array order matters", [3]int{1, 2, 3}, datahash.Options{}, mustHash(t, [3]int{1, 2, 3}, datahash.Options{})},
-		{"pointer value", ptrTo(99), datahash.Options{}, mustHash(t, ptrTo(99), datahash.Options{})},
-		{"cyclic pointer", makeCyclic(), datahash.Options{}, mustHash(t, makeCyclic(), datahash.Options{})},
-		{"custom hash writer", customHash{"abc"}, datahash.Options{}, mustHash(t, customHash{"abc"}, datahash.Options{})},
-		{"nil pointer", (*int)(nil), datahash.Options{}, mustHash(t, (*int)(nil), datahash.Options{})},
-		{"nil interface", (interface{})(nil), datahash.Options{}, mustHash(t, (interface{})(nil), datahash.Options{})},
-		{"slice with nils", []*int{nil, ptrTo(1)}, datahash.Options{}, mustHash(t, []*int{nil, ptrTo(1)}, datahash.Options{})},
-		{"map with zero value", map[string]int{"a": 0}, datahash.Options{}, mustHash(t, map[string]int{"a": 0}, datahash.Options{})},
-		{"map with values", map[string]int{"a": 100, "b": 200}, datahash.Options{}, mustHash(t, map[string]int{"a": 100, "b": 200}, datahash.Options{})},
-		{"empty map", map[int]string{}, datahash.Options{}, mustHash(t, map[int]string{}, datahash.Options{})},
-		{"empty slice", []string{}, datahash.Options{}, mustHash(t, []string{}, datahash.Options{})},
-		{"text marshal global option", textMarshaler{"global"}, datahash.Options{Text: true}, mustHash(t, textMarshaler{"global"}, datahash.Options{Text: true})},
-		{"binary marshal global option", binaryMarshaler{5}, datahash.Options{Binary: true}, mustHash(t, binaryMarshaler{5}, datahash.Options{Binary: true})},
-		{"json marshal global option", struct{ X int }{X: 1}, datahash.Options{JSON: true}, mustHash(t, struct{ X int }{X: 1}, datahash.Options{JSON: true})},
-		{"stringer global option", stringerType{42}, datahash.Options{String: true}, mustHash(t, stringerType{42}, datahash.Options{String: true})},
-		{"zeronil enabled", (*int)(nil), datahash.Options{ZeroNil: true}, mustHash(t, 0, datahash.Options{ZeroNil: true})},
+		}{binaryMarshaler{N: 255}}, &datahash.Options{})},
+		{"slice vs set", []int{1, 2, 3}, &datahash.Options{Set: true}, mustHash(t, []int{3, 2, 1}, &datahash.Options{Set: true})},
+		{"array order matters", [3]int{1, 2, 3}, &datahash.Options{}, mustHash(t, [3]int{1, 2, 3}, &datahash.Options{})},
+		{"pointer value", ptrTo(99), &datahash.Options{}, mustHash(t, ptrTo(99), &datahash.Options{})},
+		{"cyclic pointer", makeCyclic(), &datahash.Options{}, mustHash(t, makeCyclic(), &datahash.Options{})},
+		{"custom hash writer", customHash{"abc"}, &datahash.Options{}, mustHash(t, customHash{"abc"}, &datahash.Options{})},
+		{"nil pointer", (*int)(nil), &datahash.Options{}, mustHash(t, (*int)(nil), &datahash.Options{})},
+		{"nil interface", (interface{})(nil), &datahash.Options{}, mustHash(t, (interface{})(nil), &datahash.Options{})},
+		{"slice with nils", []*int{nil, ptrTo(1)}, &datahash.Options{}, mustHash(t, []*int{nil, ptrTo(1)}, &datahash.Options{})},
+		{"map with zero value", map[string]int{"a": 0}, &datahash.Options{}, mustHash(t, map[string]int{"a": 0}, &datahash.Options{})},
+		{"map with values", map[string]int{"a": 100, "b": 200}, &datahash.Options{}, mustHash(t, map[string]int{"a": 100, "b": 200}, &datahash.Options{})},
+		{"empty map", map[int]string{}, &datahash.Options{}, mustHash(t, map[int]string{}, &datahash.Options{})},
+		{"empty slice", []string{}, &datahash.Options{}, mustHash(t, []string{}, &datahash.Options{})},
+		{"text marshal global option", textMarshaler{"global"}, &datahash.Options{Text: true}, mustHash(t, textMarshaler{"global"}, &datahash.Options{Text: true})},
+		{"binary marshal global option", binaryMarshaler{5}, &datahash.Options{Binary: true}, mustHash(t, binaryMarshaler{5}, &datahash.Options{Binary: true})},
+		{"json marshal global option", struct{ X int }{X: 1}, &datahash.Options{JSON: true}, mustHash(t, struct{ X int }{X: 1}, &datahash.Options{JSON: true})},
+		{"stringer global option", stringerType{42}, &datahash.Options{String: true}, mustHash(t, stringerType{42}, &datahash.Options{String: true})},
+		{"zeronil enabled", (*int)(nil), &datahash.Options{ZeroNil: true}, mustHash(t, 0, &datahash.Options{ZeroNil: true})},
 		{"ignorezero field skipped", struct {
 			A int
 			B int `datahash:"ignorezero"`
-		}{A: 1, B: 0}, datahash.Options{}, mustHash(t, struct {
+		}{A: 1, B: 0}, &datahash.Options{}, mustHash(t, struct {
 			A int
 			B int `datahash:"ignorezero"`
-		}{A: 1, B: 0}, datahash.Options{})},
+		}{A: 1, B: 0}, &datahash.Options{})},
 		{"ignorezero set globally", struct {
 			A int
 			B int
-		}{A: 1, B: 0}, datahash.Options{IgnoreZero: true}, mustHash(t, struct {
+		}{A: 1, B: 0}, &datahash.Options{IgnoreZero: true}, mustHash(t, struct {
 			A int
 			B int
-		}{A: 1, B: 0}, datahash.Options{IgnoreZero: true})},
-		{"complex128 value", complex(1.5, -2.5), datahash.Options{}, mustHash(t, complex(1.5, -2.5), datahash.Options{})},
-		{"seq2 slice type", slices.All([]int{10, 20, 30}), datahash.Options{}, mustHash(t, slices.All([]int{10, 20, 30}), datahash.Options{})},
-		{"seq slice type", slices.Values([]int{10, 20, 30}), datahash.Options{}, mustHash(t, slices.Values([]int{10, 20, 30}), datahash.Options{})},
-		{"seq slice type as set", slices.Values([]int{10, 20, 30}), datahash.Options{Set: true}, mustHash(t, slices.Values([]int{10, 30, 20}), datahash.Options{Set: true})},
-		{"seq map type", maps.All(map[int]string{1: "one", 2: "two"}), datahash.Options{Set: true}, mustHash(t, maps.All(map[int]string{1: "one", 2: "two"}), datahash.Options{Set: true})},
-		{"byte slice", []byte("hello"), datahash.Options{}, mustHash(t, []byte("hello"), datahash.Options{})},
-		{"interface json marshal", jsonMarshaler{Val: "json"}, datahash.Options{JSON: true}, mustHash(t, jsonMarshaler{Val: "json"}, datahash.Options{JSON: true})},
+		}{A: 1, B: 0}, &datahash.Options{IgnoreZero: true})},
+		{"complex128 value", complex(1.5, -2.5), &datahash.Options{}, mustHash(t, complex(1.5, -2.5), &datahash.Options{})},
+		{"seq2 slice type", slices.All([]int{10, 20, 30}), &datahash.Options{}, mustHash(t, slices.All([]int{10, 20, 30}), &datahash.Options{})},
+		{"seq slice type", slices.Values([]int{10, 20, 30}), &datahash.Options{}, mustHash(t, slices.Values([]int{10, 20, 30}), &datahash.Options{})},
+		{"seq slice type as set", slices.Values([]int{10, 20, 30}), &datahash.Options{Set: true}, mustHash(t, slices.Values([]int{10, 30, 20}), &datahash.Options{Set: true})},
+		{"seq map type", maps.All(map[int]string{1: "one", 2: "two"}), &datahash.Options{Set: true}, mustHash(t, maps.All(map[int]string{1: "one", 2: "two"}), &datahash.Options{Set: true})},
+		{"byte slice", []byte("hello"), &datahash.Options{}, mustHash(t, []byte("hello"), &datahash.Options{})},
+		{"interface json marshal", jsonMarshaler{Val: "json"}, &datahash.Options{JSON: true}, mustHash(t, jsonMarshaler{Val: "json"}, &datahash.Options{JSON: true})},
+		{"map equals struct set", map[string]any{"one": 1, "Two": "2"}, &datahash.Options{}, mustHash(t, struct {
+			one uint64
+			Two *bytes.Buffer `datahash:"string"`
+		}{one: 1, Two: bytes.NewBuffer([]byte("2"))}, &datahash.Options{Set: true})},
+		{"map equals struct set 2", map[string]any{"one": 1, "two": "2"}, &datahash.Options{}, mustHash(t, struct {
+			one uint64
+			two string `datahash:"string"`
+		}{one: 1, two: "2"}, &datahash.Options{Set: true})},
+		{"slice equals iter.Seq set", []any{1, "2", true}, &datahash.Options{Set: true}, mustHash(t, slices.Values([]any{"2", true, 1}), &datahash.Options{Set: true})},
 	}
 
 	for _, tc := range tests {
@@ -146,7 +156,7 @@ func TestHasher_Hash(t *testing.T) {
 	}
 }
 
-func mustHash(t *testing.T, value any, opts datahash.Options) uint64 {
+func mustHash(t *testing.T, value any, opts *datahash.Options) uint64 {
 	t.Helper()
 	h := datahash.New(fnv.New64a, opts)
 	out, err := h.Hash(value)

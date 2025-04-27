@@ -105,7 +105,7 @@ func generateRandomValue(r *rand.Rand, depth int) any {
 }
 
 func FuzzHash(f *testing.F) {
-	hasher := datahash.New(fnv.New64a, datahash.Options{})
+	hasher := datahash.New(fnv.New64a, &datahash.Options{})
 	r := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 42))
 
 	seen := make(map[uint64]any)
