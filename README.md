@@ -45,7 +45,6 @@ type MyStruct struct {
 func main() {
 	hasher := datahash.New(xxhash.New, &datahash.Options{
 		Set:        false,
-		Binary:     false,
 		Text:       false,
 		JSON:       false,
 		String:     false,
@@ -66,7 +65,6 @@ func main() {
 |------------|-------------|
 | Tag        | Struct tag key to control field behavior (default: `datahash`). |
 | Set        | Treat structs, slices, iter.Seq, and iter.Seq2 as unordered sets. |
-| Binary     | Prefer `encoding.BinaryMarshaler` if available (`datahash:"binary"`). |
 | Text       | Prefer `encoding.TextMarshaler` if available (`datahash:"text"`). |
 | JSON       | Prefer `json.Marshaler` if available (`datahash:"json"`). |
 | String     | Prefer `fmt.Stringer` if available (`datahash:"string"`). |
@@ -88,31 +86,27 @@ This benchmark demonstrates that datahash is faster and more memory-efficient th
 alternatives like hashstructure or JSON marshaling with FNV hashing.
 
 ```go
-go test -bench=. -benchmem                                         
+go test -bench=. -benchmem                                                                
 goos: darwin
 goarch: arm64
 pkg: github.com/go-sqlt/datahash
 cpu: Apple M3 Pro
-BenchmarkHashers/Primitive_int_/Datahash_______________-12              56794764                20.83 ns/op            0 B/op          0 allocs/op
-BenchmarkHashers/Primitive_int_/Mitchellh/Hashstructure-12              25998645                41.62 ns/op           24 B/op          3 allocs/op
-BenchmarkHashers/Primitive_int_/Gohugoio/Hashstructure_-12              39480448                30.37 ns/op           16 B/op          2 allocs/op
-BenchmarkHashers/Primitive_int_/JSON___________________-12              19139836                61.53 ns/op           24 B/op          2 allocs/op
-BenchmarkHashers/String_value__/Datahash_______________-12              60617798                23.14 ns/op            0 B/op          0 allocs/op
-BenchmarkHashers/String_value__/Mitchellh/Hashstructure-12              35633994                33.40 ns/op           24 B/op          2 allocs/op
-BenchmarkHashers/String_value__/Gohugoio/Hashstructure_-12              38488472                30.58 ns/op           24 B/op          2 allocs/op
-BenchmarkHashers/String_value__/JSON___________________-12              17762340                66.33 ns/op           24 B/op          2 allocs/op
-BenchmarkHashers/Simple_struct_/Datahash_______________-12              18928401                64.39 ns/op            0 B/op          0 allocs/op
-BenchmarkHashers/Simple_struct_/Mitchellh/Hashstructure-12               3003730               393.2 ns/op           248 B/op         17 allocs/op
-BenchmarkHashers/Simple_struct_/Gohugoio/Hashstructure_-12               3079431               388.3 ns/op           248 B/op         17 allocs/op
-BenchmarkHashers/Simple_struct_/JSON___________________-12              11993328               100.2 ns/op            40 B/op          2 allocs/op
-BenchmarkHashers/Complex_struct/Datahash_______________-12               1812651               661.4 ns/op           256 B/op          5 allocs/op
-BenchmarkHashers/Complex_struct/Mitchellh/Hashstructure-12                483381              2343 ns/op            1480 B/op         92 allocs/op
-BenchmarkHashers/Complex_struct/Gohugoio/Hashstructure_-12                494407              2370 ns/op            1416 B/op         90 allocs/op
-BenchmarkHashers/Complex_struct/JSON___________________-12               1000000              1109 ns/op             496 B/op          8 allocs/op
-BenchmarkHashers/Map_value_____/Datahash_______________-12               3642258               327.8 ns/op           224 B/op          7 allocs/op
-BenchmarkHashers/Map_value_____/Mitchellh/Hashstructure-12               1993250               598.7 ns/op           352 B/op         29 allocs/op
-BenchmarkHashers/Map_value_____/Gohugoio/Hashstructure_-12               2172636               552.5 ns/op           208 B/op         24 allocs/op
-BenchmarkHashers/Map_value_____/JSON___________________-12               3248755               370.4 ns/op           280 B/op          9 allocs/op
+BenchmarkHashers/Simple_struct_/Datahash+fnv_-12                19501466                60.28 ns/op            0 B/op          0 allocs/op
+BenchmarkHashers/Simple_struct_/Mitchellh+fnv-12                 2291349               455.9 ns/op           248 B/op         17 allocs/op
+BenchmarkHashers/Simple_struct_/Gohugoio+fnv_-12                 2988314               394.0 ns/op           248 B/op         17 allocs/op
+BenchmarkHashers/Simple_struct_/JSON+fnv_____-12                12592008                94.32 ns/op           32 B/op          1 allocs/op
+BenchmarkHashers/Simple_struct_/Datahash+xxhash_-12             16792522                70.96 ns/op            0 B/op          0 allocs/op
+BenchmarkHashers/Simple_struct_/Mitchellh+xxhash-12              2965380               403.0 ns/op           320 B/op         17 allocs/op
+BenchmarkHashers/Simple_struct_/Gohugoio+xxhash_-12              3271189               367.8 ns/op           280 B/op         13 allocs/op
+BenchmarkHashers/Simple_struct_/JSON+xxhash_____-12             14283432                82.67 ns/op           32 B/op          1 allocs/op
+BenchmarkHashers/Complex_struct/Datahash+fnv_-12                 2425962               498.1 ns/op           112 B/op          3 allocs/op
+BenchmarkHashers/Complex_struct/Mitchellh+fnv-12                  401911              2860 ns/op            1824 B/op        116 allocs/op
+BenchmarkHashers/Complex_struct/Gohugoio+fnv_-12                  396907              2965 ns/op            1816 B/op        115 allocs/op
+BenchmarkHashers/Complex_struct/JSON+fnv_____-12                 1000000              1081 ns/op             402 B/op          4 allocs/op
+BenchmarkHashers/Complex_struct/Datahash+xxhash_-12              2312679               518.5 ns/op           112 B/op          3 allocs/op
+BenchmarkHashers/Complex_struct/Mitchellh+xxhash-12               378866              3077 ns/op            1896 B/op        116 allocs/op
+BenchmarkHashers/Complex_struct/Gohugoio+xxhash_-12               431788              2710 ns/op            1632 B/op         87 allocs/op
+BenchmarkHashers/Complex_struct/JSON+xxhash_____-12              1528984               782.6 ns/op           402 B/op          4 allocs/op
 PASS
-ok      github.com/go-sqlt/datahash     23.964s
+ok      github.com/go-sqlt/datahash     18.852s
 ```
