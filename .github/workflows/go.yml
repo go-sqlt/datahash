@@ -43,7 +43,7 @@ jobs:
 
       - name: Run Tests with Coverage
         run: |
-          go test -race -bench . -run=xxx -benchmem -benchtime=10s -covermode=atomic -coverprofile=coverage.out -v ./...
+          go test -race -covermode=atomic -coverprofile=coverage.out -v ./...
           go tool cover -func=coverage.out -o=coverage.out
 
       - name: Generate Coverage Badge
