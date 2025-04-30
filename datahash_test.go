@@ -74,15 +74,15 @@ func TestHasher_Hash(t *testing.T) {
 			X      int
 		}{"hidden", 1}, datahash.Options{}, 16533391434161719775, 5181320448927313825},
 		{"json tag", struct {
-			V any `datahash:"json"`
+			V any
 		}{[]int{1, 2, 3}}, datahash.Options{}, 5608028861651753673, 13593344203319200405},
 		{"stringer field", struct {
-			V stringerType `datahash:"string"`
-		}{stringerType{V: 9}}, datahash.Options{}, 1704179339678544436, 6973922210871028143},
+			V stringerType
+		}{stringerType{V: 9}}, datahash.Options{String: true}, 1704179339678544436, 6973922210871028143},
 		{"binary field", struct {
 			V binaryMarshaler
 		}{binaryMarshaler{N: 255}}, datahash.Options{}, 11192428154555478883, 5928437656725233329},
-		{"slice vs set", []int{1, 2, 3}, datahash.Options{Set: true}, 17645463890579864133, 4337263566436072607},
+		{"slice vs set", []int{1, 2, 3}, datahash.Options{Unordered: true}, 17645463890579864133, 4337263566436072607},
 		{"array order matters", [3]int{1, 2, 3}, datahash.Options{}, 9037388837959980876, 15299716731391107029},
 		{"pointer value", ptrTo(99), datahash.Options{}, 12041394348134418438, 12663767419032247267},
 		{"cyclic pointer", makeCyclic(), datahash.Options{}, 8122202391527501320, 18406638134627774035},
@@ -101,24 +101,29 @@ func TestHasher_Hash(t *testing.T) {
 		{"stringer global option", stringerType{42}, datahash.Options{String: true}, 13766696074135465618, 3853657757851777848},
 		{"nil int zeronil enabled", (*int)(nil), datahash.Options{ZeroNil: true}, 12161962213042174405, 3803688792395291579},
 		{"nil int", (*int)(nil), datahash.Options{}, 14695981039346656037, 17241709254077376921},
-		{"ignorezero field skipped", struct {
+		{"ignorezero", struct {
 			A int
-			B int `datahash:"ignorezero"`
-		}{A: 1, B: 0}, datahash.Options{}, 13309547625070001189, 2369777202957076850},
-		{"ignorezero set globally", struct {
+			C int
+		}{A: 1, C: 0}, datahash.Options{IgnoreZero: true}, 14952894133494373672, 13237382587658828078},
+		{"ignorezero 2", struct {
 			A int
 			B int
 		}{A: 1, B: 0}, datahash.Options{IgnoreZero: true}, 14952894133494373672, 13237382587658828078},
+		{"ignorezero 2 as set", struct {
+			A int
+			B int
+		}{A: 1, B: 0}, datahash.Options{IgnoreZero: true, Unordered: true}, 11905026311571686442, 4322134186644821414},
+		{"ignorezero 2 as set", map[string]any{"A": 1}, datahash.Options{IgnoreZero: true}, 11905026311571686442, 4322134186644821414},
 		{"complex128 value", complex(1.5, -2.5), datahash.Options{}, 6394125825557071332, 15864597077577832294},
 		{"seq2 slice type", slices.All([]int{10, 20, 30}), datahash.Options{}, 8416685136511854477, 5615642930228160039},
 		{"seq slice type", slices.Values([]int{10, 20, 30}), datahash.Options{}, 7406063137916122164, 3727773546853566122},
-		{"seq slice type as set", slices.Values([]int{10, 20, 30}), datahash.Options{Set: true}, 653593453226122035, 2257683953387770671},
-		{"seq map type", maps.All(map[int]string{1: "one", 2: "two"}), datahash.Options{Set: true}, 15472268656711951149, 16081739586471367953},
+		{"seq slice type as set", slices.Values([]int{10, 20, 30}), datahash.Options{Unordered: true}, 653593453226122035, 2257683953387770671},
+		{"seq map type", maps.All(map[int]string{1: "one", 2: "two"}), datahash.Options{Unordered: true}, 15472268656711951149, 16081739586471367953},
 		{"byte slice", []byte("hello"), datahash.Options{}, 11831194018420276491, 2794345569481354659},
 		{"interface json marshal", jsonMarshaler{Val: "json"}, datahash.Options{JSON: true}, 2069784589039126867, 3804726148011779533},
 		{"map equals struct set", map[string]any{"one": 1, "Two": "2"}, datahash.Options{}, 2738323115711972740, 7596626971113218840},
 		{"map equals struct set 2", map[string]any{"one": 1, "two": "2"}, datahash.Options{}, 15991332270130111181, 2699984971857782748},
-		{"slice equals iter.Seq set", []any{1, "2", true}, datahash.Options{Set: true}, 1966337816571714992, 15381331533124161484},
+		{"slice equals iter.Seq set", []any{1, "2", true}, datahash.Options{Unordered: true}, 1966337816571714992, 15381331533124161484},
 	}
 
 	t.Run("fnv.New64a", func(t *testing.T) {

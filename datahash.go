@@ -1,38 +1,38 @@
 // Package datahash computes 64-bit hashes for arbitrary Go values using reflection.
 //
-// It recursively traverses Go values to produce deterministic hashes based on their content and structure.
-// Supported types include primitives, arrays, slices, maps, structs, pointers, interfaces, and sequential types.
+// It recursively traverses Go values using reflection to produce deterministic 64-bit hashes based on their content and structure.
+// Supported types include primitives, arrays, slices, maps, structs, pointers, interfaces, and types that support sequence iteration.
 //
 // Features:
 //   - Detects and handles cyclic data structures safely (via pointer tracking).
-//   - Allows customization of hashing via struct tags and Options.
-//   - Supports ordered and unordered hashing of sequences and structs (using the "set" option).
+//   - Supports ordered or unordered hashing of collections and structs via the "Unordered" option.
 //   - Integrates with encoding.BinaryMarshaler, encoding.TextMarshaler, fmt.Stringer, and custom HashWriter interfaces.
 //   - High performance through reflection caching and hasher pooling.
 //
 // Usage:
 //
 // package main
-
+//
 // import (
-// 		"fmt"
-// 		"hash/fnv"
-// 		"math/big"
-
-// 		"github.com/go-sqlt/datahash"
+//
+//	"fmt"
+//	"math/big"
+//
+//	"github.com/cespare/xxhash/v2"
+//	"github.com/go-sqlt/datahash"
+//
 // )
-
-// type MyStruct struct {
-// 		Name  string `datahash:"-"`
-// 		Age   int
-// 		Float *big.Float `datahash:"text"`
-// 	}
-
+//
+//	type MyStruct struct {
+//		Name  string `datahash:"-"`
+//		Age   int
+//		Float *big.Float
+//	}
+//
 //	func main() {
-//		hasher := datahash.New(fnv.New64a, &datahash.Options{
-//			Set:        false,
-//			Binary:     false,
-//			Text:       false,
+//		hasher := datahash.New(xxhash.New, datahash.Options{
+//			Unordered:  false,
+//			Text:       true, // big.Float implements encoding.TextMarshaler
 //			JSON:       false,
 //			String:     false,
 //			ZeroNil:    false,
@@ -42,21 +42,16 @@
 //		alice, _ := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
 //		bob, _ := hasher.Hash(MyStruct{Name: "Bob", Age: 30, Float: big.NewFloat(1.23)})
 //
-//		fmt.Println(alice, alice == bob) // Output: 13587264169994933978 true
+//		fmt.Println(alice, alice == bob) // Output: 13125691809697640472 true
 //	}
 //
-// Options:
-//   - Tag: struct tag key for reading field options (default "datahash").
-//   - Set: treat structs, slices, iter.Seq and iter.Seq2 as unordered sets ("set").
-//   - Binary/Text/JSON/String: use marshaling interfaces if available ("binary,text,json,string").
-//   - ZeroNil: treat nil pointers like zero values ("zeronil").
-//   - IgnoreZero: skip fields with zero values ("ignorezero").
-//
 // Notes:
+//   - For custom hashing behavior, implement the HashWriter or encoing.BinaryMarshaler interface.
+//   - Text/JSON/String Option: use marshaling interfaces if available.
+//   - Unordered Option: treat structs, slices, iter.Seq and iter.Seq2 as unordered sets.
 //   - Use `datahash:"-"` to exclude a field from hashing.
-//   - Struct fields are hashed in declared order unless Set is enabled, in which case order is ignored.
-//   - Maps are always hashed as a set.
-//   - For custom hashing behavior, implement the HashWriter interface.
+//   - Struct fields are hashed in declared order unless Unordered is enabled, in which case order is ignored.
+//   - Maps are always hashed as a unordered set.
 package datahash
 
 import (
@@ -69,7 +64,6 @@ import (
 	"math"
 	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"unsafe"
 )
@@ -83,64 +77,23 @@ type HashWriter interface {
 	WriteHash(hash hash.Hash64) error
 }
 
-// Options specifies configuration for hashing behavior.
-//
-// Options can be set globally when creating a Hasher, and can also
-// be overridden per field via struct tags.
-//
-// Fields:
-//   - Tag: struct tag key to read options from (default "datahash").
-//   - Set: treat structs, slices, iter.Seq and iter.Seq2 as unordered sets ("set").
-//   - Binary, Text, JSON, String: prefer marshaling interfaces if available.
-//   - ZeroNil: treat nil pointers like zero values ("zeronil").
-//   - IgnoreZero: skip fields that have zero values ("ignorezero").
+// Options configures how values are hashed, including support for unordered collections, interface marshaling, and zero value handling.
 type Options struct {
-	Tag                string
-	Set                bool
+	Unordered          bool
 	Text, JSON, String bool
 	ZeroNil            bool
 	IgnoreZero         bool
 }
 
-func (o Options) apply(tag string) (Options, error) {
-	if tag == "" {
-		return o, nil
-	}
-
-	for each := range strings.SplitSeq(tag, ",") {
-		switch each {
-		default:
-			return o, fmt.Errorf("datahash: unknown struct tag option: %q", each)
-		case "json":
-			o.JSON = true
-		case "text":
-			o.Text = true
-		case "string":
-			o.String = true
-		case "set":
-			o.Set = true
-		case "zeronil":
-			o.ZeroNil = true
-		case "ignorezero":
-			o.IgnoreZero = true
-		}
-	}
-
-	return o, nil
-}
-
 // New creates a new Hasher that uses the given hash.Hash64 constructor and Options.
 //
-// The provided init function (e.g., fnv.New64a) must return a new hash.Hash64 instance.
+// The init function (e.g., fnv.New64a, xxhash.New) must return a new hash.Hash64 instance on each call.
 //
 // Example:
 //
-//	h := datahash.New(fnv.New64a, datahash.Options{JSON: true})
+//	fnvHasher := datahash.New(fnv.New64a, datahash.Options{})
+//	xxhHasher := datahash.New(xxhash.New, datahash.Options{})
 func New[H hash.Hash64](init func() H, opts Options) *Hasher {
-	if opts.Tag == "" {
-		opts.Tag = "datahash"
-	}
-
 	return &Hasher{
 		defaultOpts: opts,
 		hashPool: &sync.Pool{
@@ -156,37 +109,6 @@ func New[H hash.Hash64](init func() H, opts Options) *Hasher {
 	}
 }
 
-type container struct {
-	hash         hash.Hash64
-	visited      []uintptr
-	visitedTypes []reflect.Type
-	buf          [8]byte
-}
-
-func (c *container) Reset() {
-	c.hash.Reset()
-	c.visited = c.visited[:0]
-	c.visitedTypes = c.visitedTypes[:0]
-}
-
-func (c *container) write(b []byte) error {
-	_, err := c.hash.Write(b)
-
-	return err
-}
-
-func (c *container) writeUint64(v uint64) error {
-	binary.LittleEndian.PutUint64(c.buf[:], v)
-
-	return c.write(c.buf[:])
-}
-
-func (c *container) writeFloat64(v float64) error {
-	binary.LittleEndian.PutUint64(c.buf[:], math.Float64bits(v))
-
-	return c.write(c.buf[:])
-}
-
 // Hasher hashes arbitrary Go values consistently according to configurable Options.
 //
 // It caches reflection logic internally for performance, is safe for concurrent use,
@@ -199,10 +121,11 @@ type Hasher struct {
 
 // Hash computes a 64-bit hash of the given value.
 //
-// It traverses the value recursively, respecting struct tags and Options,
-// and applies interface-based customizations if available (e.g., MarshalJSON, HashWriter).
+// It recursively traverses the value's structure using reflection, respecting the configured Options.
+// Custom behavior is supported via standard marshaling interfaces (BinaryMarshaler, TextMarshaler, JSONMarshaler, fmt.Stringer)
+// or the custom HashWriter interface.
 //
-// Returns the resulting hash value or an error if the value cannot be hashed.
+// Returns the computed hash or an error if hashing fails.
 func (h *Hasher) Hash(value any) (uint64, error) {
 	c := h.hashPool.Get().(*container)
 	c.Reset()
@@ -219,15 +142,20 @@ func (h *Hasher) Hash(value any) (uint64, error) {
 
 	hf, err := h.makeHashFunc(v.Type(), c, h.defaultOpts)
 	if err != nil {
+		result := c.hash.Sum64()
+
 		h.hashPool.Put(c)
 
-		return 0, err
+		return result, err
 	}
 
-	if err = hf(v, c, h.defaultOpts); err != nil {
+	err = hf(v, c, h.defaultOpts)
+	if err != nil {
+		result := c.hash.Sum64()
+
 		h.hashPool.Put(c)
 
-		return 0, err
+		return result, err
 	}
 
 	result := c.hash.Sum64()
@@ -263,6 +191,15 @@ func (h *Hasher) hashInterface(value reflect.Value, c *container, opts Options) 
 		return nil
 	}
 
+	if value.Kind() != reflect.Interface {
+		hasher, err := h.makeHashFunc(value.Type(), c, opts)
+		if err != nil {
+			return err
+		}
+
+		return hasher(value, c, opts)
+	}
+
 	elem := value.Elem()
 
 	if elem.Kind() == reflect.Invalid {
@@ -281,7 +218,7 @@ func (h *Hasher) hashSliceArray(vhf hashFunc) hashFunc {
 	return func(value reflect.Value, c *container, opts Options) error {
 		var err error
 
-		if opts.Set {
+		if opts.Unordered {
 			if !value.IsValid() || (opts.IgnoreZero && value.IsZero()) {
 				return nil
 			}
@@ -398,7 +335,7 @@ type structField struct {
 
 func (h *Hasher) hashStruct(sfs []structField) hashFunc {
 	return func(value reflect.Value, c *container, opts Options) error {
-		if opts.Set {
+		if opts.Unordered {
 			if err := c.write(startSet[:]); err != nil {
 				return err
 			}
@@ -486,7 +423,7 @@ func (h *Hasher) hashSeq2(value reflect.Value, c *container, opts Options) error
 		khf, vhf hashFunc
 	)
 
-	if opts.Set {
+	if opts.Unordered {
 		if err = c.write(startSet[:]); err != nil {
 			return err
 		}
@@ -591,7 +528,7 @@ func (h *Hasher) hashSeq(value reflect.Value, c *container, opts Options) error 
 		vhf hashFunc
 	)
 
-	if opts.Set {
+	if opts.Unordered {
 		if err = c.write(startSet[:]); err != nil {
 			return err
 		}
@@ -659,7 +596,7 @@ func (h *Hasher) hashInterfaceHashWriter(value reflect.Value, c *container, opts
 	}
 
 	if !value.CanInterface() {
-		return errors.New("cannot use datahash.HashWriter from unexported fields")
+		return errors.New("cannot use datahash.HashWriter on unexported fields that are not accessible via reflection")
 	}
 
 	i, ok := value.Interface().(HashWriter)
@@ -676,7 +613,7 @@ func (h *Hasher) hashInterfaceBinary(value reflect.Value, c *container, opts Opt
 	}
 
 	if !value.CanInterface() {
-		return errors.New("cannot use encoding.BinaryMarshaler from unexported fields")
+		return errors.New("cannot use encoding.BinaryMarshaler on unexported fields that are not accessible via reflection")
 	}
 
 	i, ok := value.Interface().(encoding.BinaryMarshaler)
@@ -698,7 +635,7 @@ func (h *Hasher) hashInterfaceText(value reflect.Value, c *container, opts Optio
 	}
 
 	if !value.CanInterface() {
-		return errors.New("cannot use encoding.TextMarshaler from unexported fields")
+		return errors.New("cannot use encoding.TextMarshaler on unexported fields that are not accessible via reflection")
 	}
 
 	i, ok := value.Interface().(encoding.TextMarshaler)
@@ -720,7 +657,7 @@ func (h *Hasher) hashInterfaceJSON(value reflect.Value, c *container, opts Optio
 	}
 
 	if !value.CanInterface() {
-		return errors.New("cannot use json.Marshaler from unexported fields")
+		return errors.New("cannot use json.Marshaler on unexported fields that are not accessible via reflection")
 	}
 
 	i, ok := value.Interface().(json.Marshaler)
@@ -742,7 +679,7 @@ func (h *Hasher) hashInterfaceStringer(value reflect.Value, c *container, opts O
 	}
 
 	if !value.CanInterface() {
-		return errors.New("cannot use fmt.Stringer from unexported fields")
+		return errors.New("cannot use fmt.Stringer on unexported fields that are not accessible via reflection")
 	}
 
 	i, ok := value.Interface().(fmt.Stringer)
@@ -895,14 +832,8 @@ func (h *Hasher) makeHashFunc(t reflect.Type, c *container, opts Options) (hf ha
 		for i := range t.NumField() {
 			sf := t.Field(i)
 
-			tag := sf.Tag.Get(opts.Tag)
-			if tag == "-" {
+			if sf.Tag.Get("datahash") == "-" {
 				continue
-			}
-
-			opts, err = opts.apply(tag)
-			if err != nil {
-				return nil, err
 			}
 
 			hf, err := h.makeHashFunc(sf.Type, c, opts)
@@ -935,6 +866,37 @@ func (h *Hasher) checkout(t reflect.Type, hf hashFunc) (hashFunc, error) {
 	h.hashFuncMap.Store(t, hf)
 
 	return hf, nil
+}
+
+type container struct {
+	hash         hash.Hash64
+	visited      []uintptr
+	visitedTypes []reflect.Type
+	buf          [8]byte
+}
+
+func (c *container) Reset() {
+	c.hash.Reset()
+	c.visited = c.visited[:0]
+	c.visitedTypes = c.visitedTypes[:0]
+}
+
+func (c *container) write(b []byte) error {
+	_, err := c.hash.Write(b)
+
+	return err
+}
+
+func (c *container) writeUint64(v uint64) error {
+	binary.LittleEndian.PutUint64(c.buf[:], v)
+
+	return c.write(c.buf[:])
+}
+
+func (c *container) writeFloat64(v float64) error {
+	binary.LittleEndian.PutUint64(c.buf[:], math.Float64bits(v))
+
+	return c.write(c.buf[:])
 }
 
 func stringToBytes(s string) []byte {

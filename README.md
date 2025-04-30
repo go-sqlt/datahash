@@ -10,11 +10,10 @@ It produces consistent 64-bit hashes by recursively traversing data structures.
 ## Features
 
 - Consistent 64-bit hashing of any Go value.
-- Handles cyclic data structures safely (pointer tracking).
-- Supports struct tags and per-field options.
 - Supports structs, slices, iter.Seq, and iter.Seq2 as unordered sets (default: ordered).
+- Supports custom hash logic via datahash.HashWriter or encoding.BinaryMarshaler interface.
 - Integrates with: encoding.BinaryMarshaler, encoding.TextMarshaler, encoding/json.Marshaler, fmt.Stringer.
-- Supports custom hash logic via datahash.HashWriter interface.
+- Handles cyclic data structures safely (pointer tracking).
 - High performance: type caching and hasher pooling.
 
 ## Installation
@@ -39,13 +38,13 @@ import (
 type MyStruct struct {
 	Name  string `datahash:"-"`
 	Age   int
-	Float *big.Float `datahash:"text"`
+	Float *big.Float
 }
 
 func main() {
-	hasher := datahash.New(xxhash.New, &datahash.Options{
-		Set:        false,
-		Text:       false,
+	hasher := datahash.New(xxhash.New, datahash.Options{
+		Unordered:  false,
+		Text:       true, // big.Float implements encoding.TextMarshaler
 		JSON:       false,
 		String:     false,
 		ZeroNil:    false,
@@ -63,27 +62,32 @@ func main() {
 
 | Option     | Description |
 |------------|-------------|
-| Tag        | Struct tag key to control field behavior (default: `datahash`). |
-| Set        | Treat structs, slices, iter.Seq, and iter.Seq2 as unordered sets. |
-| Text       | Prefer `encoding.TextMarshaler` if available (`datahash:"text"`). |
-| JSON       | Prefer `json.Marshaler` if available (`datahash:"json"`). |
-| String     | Prefer `fmt.Stringer` if available (`datahash:"string"`). |
-| ZeroNil    | Treat nil pointers like zero values (`datahash:"zeronil"`). |
-| IgnoreZero | Skip zero-value fields from hashing (`datahash:"ignorezero"`). |
+| Unordered  | Treat structs, slices, iter.Seq, and iter.Seq2 as unordered sets. |
+| Text       | Prefer `encoding.TextMarshaler` if available. |
+| JSON       | Prefer `json.Marshaler` if available. |
+| String     | Prefer `fmt.Stringer` if available. |
+| ZeroNil    | Treat nil pointers like zero values. |
+| IgnoreZero | Skip zero-value fields from hashing. |
 
 ## Notes
 
 - By default struct fields are hashed in their declared order.
-- Maps and sets are folded using XOR for order-independence.
+- Maps and unordered sets are folded using XOR for order-independence.
 - Cyclic pointers are detected and skipped safely.
 - Use datahash:"-" to exclude fields from hashing.
-- Implement HashWriter for custom hash behavior.
+- Implement `datahash.HashWriter` or `encoding.BinaryMarshaler` for custom hash behavior.
 - Unexported fields cannot be used with custom marshalers. (!)
 
 ## Benchmark
 
-This benchmark demonstrates that datahash is faster and more memory-efficient than 
-alternatives like hashstructure or JSON marshaling with FNV hashing.
+These benchmarks demonstrate that datahash is 5–6× faster and significantly more memory-efficient than both 
+mitchellh/hashstructure and gohugoio/hashstructure.
+
+Notably, serializing to JSON and hashing the output with cespare/xxhash/v2 performs reasonably well and can 
+be a viable alternative in some cases. However, JSON-based approaches cannot guarantee consistent map ordering during hashing.
+
+By contrast, datahash always hashes maps as unordered sets and offers the same unordered (set-like) treatment 
+for structs, slices, arrays, and iterators—making it more deterministic and flexible for complex data structures.
 
 ```go
 go test -bench=. -benchmem                                                                

@@ -78,7 +78,7 @@ func BenchmarkHashers(b *testing.B) {
 
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			b.Run("Datahash+fnv ", func(b *testing.B) {
+			b.Run("Datahash+fnv    ", func(b *testing.B) {
 				hasher := datahash.New(fnv.New64a, datahash.Options{IgnoreZero: true})
 
 				b.ReportAllocs()
@@ -90,7 +90,7 @@ func BenchmarkHashers(b *testing.B) {
 				}
 			})
 
-			b.Run("Mitchellh+fnv", func(b *testing.B) {
+			b.Run("Mitchellh+fnv   ", func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
@@ -102,7 +102,7 @@ func BenchmarkHashers(b *testing.B) {
 				}
 			})
 
-			b.Run("Gohugoio+fnv ", func(b *testing.B) {
+			b.Run("Gohugoio+fnv    ", func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
@@ -114,7 +114,7 @@ func BenchmarkHashers(b *testing.B) {
 				}
 			})
 
-			b.Run("JSON+fnv     ", func(b *testing.B) {
+			b.Run("JSON+fnv        ", func(b *testing.B) {
 				hasher := fnv.New64a()
 
 				b.ReportAllocs()
