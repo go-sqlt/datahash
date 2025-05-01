@@ -185,7 +185,7 @@ func (h *Hasher) hashUnorderedSliceArray(vhf hashFunc) hashFunc {
 	return func(value reflect.Value, c *container) error {
 		var err error
 
-		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+		if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 			return nil
 		}
 
@@ -233,7 +233,7 @@ func (h *Hasher) hashSliceArray(vhf hashFunc) hashFunc {
 	return func(value reflect.Value, c *container) error {
 		var err error
 
-		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+		if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 			return nil
 		}
 
@@ -288,7 +288,7 @@ func (h *Hasher) hashMap(khf, vhf hashFunc) hashFunc {
 			tmp.Reset()
 
 			value := iter.Value()
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 				continue
 			}
 
@@ -417,7 +417,7 @@ func (h *Hasher) hashStruct(sfs []structField) hashFunc {
 func (h *Hasher) hashSeq2() hashFunc {
 	if h.opts.UnorderedSeq2 {
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || value.IsNil() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
@@ -485,7 +485,7 @@ func (h *Hasher) hashSeq2() hashFunc {
 	}
 
 	return func(value reflect.Value, c *container) error {
-		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+		if !value.IsValid() || value.IsNil() || (h.opts.IgnoreZero && isZero(value)) {
 			return nil
 		}
 
@@ -533,7 +533,7 @@ func (h *Hasher) hashSeq2() hashFunc {
 func (h *Hasher) hashSeq() hashFunc {
 	if h.opts.UnorderedSeq {
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || value.IsNil() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
@@ -590,7 +590,7 @@ func (h *Hasher) hashSeq() hashFunc {
 	}
 
 	return func(value reflect.Value, c *container) error {
-		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+		if !value.IsValid() || value.IsNil() || (h.opts.IgnoreZero && isZero(value)) {
 			return nil
 		}
 
@@ -654,12 +654,16 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 	switch {
 	case t.Implements(hashWriterType):
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
 			if !value.CanInterface() {
 				return errors.New("cannot use datahash.HashWriter on unexported fields that are not accessible via reflection")
+			}
+
+			if value.Kind() == reflect.Pointer && value.IsNil() {
+				return nil
 			}
 
 			i, ok := value.Interface().(HashWriter)
@@ -671,12 +675,16 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		}, nil
 	case t.Implements(binaryMarshalerType):
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
 			if !value.CanInterface() {
 				return errors.New("cannot use encoding.BinaryMarshaler on unexported fields that are not accessible via reflection")
+			}
+
+			if value.Kind() == reflect.Pointer && value.IsNil() {
+				return nil
 			}
 
 			i, ok := value.Interface().(encoding.BinaryMarshaler)
@@ -693,12 +701,16 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		}, nil
 	case h.opts.Text && t.Implements(textMarshalerType):
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
 			if !value.CanInterface() {
 				return errors.New("cannot use encoding.TextMarshaler on unexported fields that are not accessible via reflection")
+			}
+
+			if value.Kind() == reflect.Pointer && value.IsNil() {
+				return nil
 			}
 
 			i, ok := value.Interface().(encoding.TextMarshaler)
@@ -715,12 +727,16 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		}, nil
 	case h.opts.JSON && t.Implements(jsonMarshalerType):
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
 			if !value.CanInterface() {
 				return errors.New("cannot use json.Marshaler on unexported fields that are not accessible via reflection")
+			}
+
+			if value.Kind() == reflect.Pointer && value.IsNil() {
+				return nil
 			}
 
 			i, ok := value.Interface().(json.Marshaler)
@@ -737,12 +753,16 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		}, nil
 	case h.opts.String && t.Implements(stringerType):
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
 			if !value.CanInterface() {
 				return errors.New("cannot use fmt.Stringer on unexported fields that are not accessible via reflection")
+			}
+
+			if value.Kind() == reflect.Pointer && value.IsNil() {
+				return nil
 			}
 
 			i, ok := value.Interface().(fmt.Stringer)
@@ -757,7 +777,7 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 	switch t.Kind() {
 	case reflect.Interface:
 		return func(value reflect.Value, c *container) error {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 				return nil
 			}
 
@@ -861,7 +881,7 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 
 		if elem.Kind() == reflect.Uint8 {
 			return func(value reflect.Value, c *container) error {
-				if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				if !value.IsValid() || (h.opts.IgnoreZero && isZero(value)) {
 					return nil
 				}
 
