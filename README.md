@@ -43,12 +43,16 @@ type MyStruct struct {
 
 func main() {
 	hasher := datahash.New(xxhash.New, datahash.Options{
-		Unordered:  false,
-		Text:       true, // big.Float implements encoding.TextMarshaler
-		JSON:       false,
-		String:     false,
-		ZeroNil:    false,
-		IgnoreZero: false,
+		UnorderedStruct: false,
+		UnorderedSlice:  false,
+		UnorderedArray:  false,
+		UnorderedSeq:    false,
+		UnorderedSeq2:   false,
+		Text:            true, // big.Float implements encoding.TextMarshaler
+		JSON:            false,
+		String:          false,
+		ZeroNil:         false,
+		IgnoreZero:      false,
 	})
 
 	alice, _ := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
@@ -62,7 +66,7 @@ func main() {
 
 | Option     | Description |
 |------------|-------------|
-| Unordered  | Treat structs, slices, iter.Seq, and iter.Seq2 as unordered sets. |
+| Unordered* | Treat structs, slices, iter.Seq, and iter.Seq2 as unordered sets. |
 | Text       | Prefer `encoding.TextMarshaler` if available. |
 | JSON       | Prefer `json.Marshaler` if available. |
 | String     | Prefer `fmt.Stringer` if available. |
@@ -90,27 +94,27 @@ By contrast, datahash always hashes maps as unordered sets and offers the same u
 for structs, slices, arrays, and iterators—making it more deterministic and flexible for complex data structures.
 
 ```go
-go test -bench=. -benchmem               
+go test -bench=. -benchmem                                                                     
 goos: darwin
 goarch: arm64
 pkg: github.com/go-sqlt/datahash
 cpu: Apple M3 Pro
-BenchmarkHashers/Simple_struct_/Datahash+fnv____-12             20743609                57.63 ns/op            0 B/op          0 allocs/op
-BenchmarkHashers/Simple_struct_/Mitchellh+fnv___-12              2947899               393.8 ns/op           248 B/op         17 allocs/op
-BenchmarkHashers/Simple_struct_/Gohugoio+fnv____-12              3012933               397.6 ns/op           248 B/op         17 allocs/op
-BenchmarkHashers/Simple_struct_/JSON+fnv________-12             12187029                96.18 ns/op           32 B/op          1 allocs/op
-BenchmarkHashers/Simple_struct_/Datahash+xxhash_-12             17991476                65.04 ns/op            0 B/op          0 allocs/op
-BenchmarkHashers/Simple_struct_/Mitchellh+xxhash-12              2909797               409.8 ns/op           320 B/op         17 allocs/op
-BenchmarkHashers/Simple_struct_/Gohugoio+xxhash_-12              3165878               378.1 ns/op           280 B/op         13 allocs/op
-BenchmarkHashers/Simple_struct_/JSON+xxhash_____-12             14335510                83.70 ns/op           32 B/op          1 allocs/op
-BenchmarkHashers/Complex_struct/Datahash+fnv____-12              2552940               469.6 ns/op           112 B/op          3 allocs/op
-BenchmarkHashers/Complex_struct/Mitchellh+fnv___-12               407378              2917 ns/op            1824 B/op        116 allocs/op
-BenchmarkHashers/Complex_struct/Gohugoio+fnv____-12               384549              3049 ns/op            1816 B/op        115 allocs/op
-BenchmarkHashers/Complex_struct/JSON+fnv________-12              1000000              1117 ns/op             402 B/op          4 allocs/op
-BenchmarkHashers/Complex_struct/Datahash+xxhash_-12              2326400               510.9 ns/op           112 B/op          3 allocs/op
-BenchmarkHashers/Complex_struct/Mitchellh+xxhash-12               371761              3171 ns/op            1896 B/op        116 allocs/op
-BenchmarkHashers/Complex_struct/Gohugoio+xxhash_-12               417607              2821 ns/op            1632 B/op         87 allocs/op
-BenchmarkHashers/Complex_struct/JSON+xxhash_____-12              1485633               809.5 ns/op           402 B/op          4 allocs/op
+BenchmarkHashers/Simple_struct_/Datahash+fnv____-12             19361168                62.26 ns/op            0 B/op          0 allocs/op
+BenchmarkHashers/Simple_struct_/Mitchellh+fnv___-12              3188221               375.4 ns/op           248 B/op         17 allocs/op
+BenchmarkHashers/Simple_struct_/Gohugoio+fnv____-12              3128008               382.5 ns/op           248 B/op         17 allocs/op
+BenchmarkHashers/Simple_struct_/JSON+fnv________-12             12856419                92.97 ns/op           32 B/op          1 allocs/op
+BenchmarkHashers/Simple_struct_/Datahash+xxhash_-12             17606150                68.44 ns/op            0 B/op          0 allocs/op
+BenchmarkHashers/Simple_struct_/Mitchellh+xxhash-12              2989147               400.5 ns/op           320 B/op         17 allocs/op
+BenchmarkHashers/Simple_struct_/Gohugoio+xxhash_-12              3274119               366.8 ns/op           280 B/op         13 allocs/op
+BenchmarkHashers/Simple_struct_/JSON+xxhash_____-12             14634495                81.56 ns/op           32 B/op          1 allocs/op
+BenchmarkHashers/Complex_struct/Datahash+fnv____-12              2353440               508.8 ns/op           112 B/op          3 allocs/op
+BenchmarkHashers/Complex_struct/Mitchellh+fnv___-12               397953              2827 ns/op            1824 B/op        116 allocs/op
+BenchmarkHashers/Complex_struct/Gohugoio+fnv____-12               398600              2929 ns/op            1816 B/op        115 allocs/op
+BenchmarkHashers/Complex_struct/JSON+fnv________-12              1000000              1065 ns/op             402 B/op          4 allocs/op
+BenchmarkHashers/Complex_struct/Datahash+xxhash_-12              2157326               555.5 ns/op           112 B/op          3 allocs/op
+BenchmarkHashers/Complex_struct/Mitchellh+xxhash-12               381286              3085 ns/op            1896 B/op        116 allocs/op
+BenchmarkHashers/Complex_struct/Gohugoio+xxhash_-12               412080              2728 ns/op            1632 B/op         87 allocs/op
+BenchmarkHashers/Complex_struct/JSON+xxhash_____-12              1550758               775.8 ns/op           402 B/op          4 allocs/op
 PASS
-ok      github.com/go-sqlt/datahash     19.083s
+ok      github.com/go-sqlt/datahash     19.110s
 ```

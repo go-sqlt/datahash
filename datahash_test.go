@@ -82,7 +82,7 @@ func TestHasher_Hash(t *testing.T) {
 		{"binary field", struct {
 			V binaryMarshaler
 		}{binaryMarshaler{N: 255}}, datahash.Options{}, 11192428154555478883, 5928437656725233329},
-		{"slice vs set", []int{1, 2, 3}, datahash.Options{Unordered: true}, 17645463890579864133, 4337263566436072607},
+		{"slice vs set", []int{1, 2, 3}, datahash.Options{UnorderedSlice: true}, 17645463890579864133, 4337263566436072607},
 		{"array order matters", [3]int{1, 2, 3}, datahash.Options{}, 9037388837959980876, 15299716731391107029},
 		{"pointer value", ptrTo(99), datahash.Options{}, 12041394348134418438, 12663767419032247267},
 		{"cyclic pointer", makeCyclic(), datahash.Options{}, 8122202391527501320, 18406638134627774035},
@@ -112,18 +112,24 @@ func TestHasher_Hash(t *testing.T) {
 		{"ignorezero 2 as set", struct {
 			A int
 			B int
-		}{A: 1, B: 0}, datahash.Options{IgnoreZero: true, Unordered: true}, 11905026311571686442, 4322134186644821414},
+		}{A: 1, B: 0}, datahash.Options{IgnoreZero: true, UnorderedStruct: true}, 11905026311571686442, 4322134186644821414},
 		{"ignorezero 2 as set", map[string]any{"A": 1}, datahash.Options{IgnoreZero: true}, 11905026311571686442, 4322134186644821414},
 		{"complex128 value", complex(1.5, -2.5), datahash.Options{}, 6394125825557071332, 15864597077577832294},
 		{"seq2 slice type", slices.All([]int{10, 20, 30}), datahash.Options{}, 8416685136511854477, 5615642930228160039},
 		{"seq slice type", slices.Values([]int{10, 20, 30}), datahash.Options{}, 7406063137916122164, 3727773546853566122},
-		{"seq slice type as set", slices.Values([]int{10, 20, 30}), datahash.Options{Unordered: true}, 653593453226122035, 2257683953387770671},
-		{"seq map type", maps.All(map[int]string{1: "one", 2: "two"}), datahash.Options{Unordered: true}, 15472268656711951149, 16081739586471367953},
+		{"seq slice type as set", slices.Values([]int{10, 20, 30}), datahash.Options{UnorderedSeq: true}, 653593453226122035, 2257683953387770671},
+		{"seq map type", maps.All(map[int]string{1: "one", 2: "two"}), datahash.Options{UnorderedSeq2: true}, 15472268656711951149, 16081739586471367953},
 		{"byte slice", []byte("hello"), datahash.Options{}, 11831194018420276491, 2794345569481354659},
 		{"interface json marshal", jsonMarshaler{Val: "json"}, datahash.Options{JSON: true}, 2069784589039126867, 3804726148011779533},
 		{"map equals struct set", map[string]any{"one": 1, "Two": "2"}, datahash.Options{}, 2738323115711972740, 7596626971113218840},
 		{"map equals struct set 2", map[string]any{"one": 1, "two": "2"}, datahash.Options{}, 15991332270130111181, 2699984971857782748},
-		{"slice equals iter.Seq set", []any{1, "2", true}, datahash.Options{Unordered: true}, 1966337816571714992, 15381331533124161484},
+		{"slice", []any{1, "2", true}, datahash.Options{UnorderedSlice: true}, 1966337816571714992, 15381331533124161484},
+		{"iter.Seq", slices.Values([]any{1, "2", true}), datahash.Options{UnorderedSeq: true}, 1966337816571714992, 15381331533124161484},
+		{"empty slice", []any{0, false, ""}, datahash.Options{IgnoreZero: true}, 588776415145865754, 5936373637795240346},
+		{"empty iter.Seq", slices.Values([]any{0, false, ""}), datahash.Options{IgnoreZero: true}, 588776415145865754, 5936373637795240346},
+		{"empty iter.Seq2", slices.All([]any{0, false, ""}), datahash.Options{IgnoreZero: true}, 588776415145865754, 5936373637795240346},
+		{"empty slice as set", []any{0, false, ""}, datahash.Options{IgnoreZero: true, UnorderedSlice: true}, 586861065889900642, 9169957362658601663},
+		{"empty iter.Seq as set", slices.Values([]any{0, false, ""}), datahash.Options{IgnoreZero: true, UnorderedSeq: true}, 586861065889900642, 9169957362658601663},
 	}
 
 	t.Run("fnv.New64a", func(t *testing.T) {

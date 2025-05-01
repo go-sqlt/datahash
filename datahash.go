@@ -31,12 +31,16 @@
 //
 //	func main() {
 //		hasher := datahash.New(xxhash.New, datahash.Options{
-//			Unordered:  false,
-//			Text:       true, // big.Float implements encoding.TextMarshaler
-//			JSON:       false,
-//			String:     false,
-//			ZeroNil:    false,
-//			IgnoreZero: false,
+//			UnorderedStruct: false,
+//			UnorderedSlice:  false,
+//			UnorderedArray:  false,
+//			UnorderedSeq:    false,
+//			UnorderedSeq2:   false,
+//			Text:            true, // big.Float implements encoding.TextMarshaler
+//			JSON:            false,
+//			String:          false,
+//			ZeroNil:         false,
+//			IgnoreZero:      false,
 //		})
 //
 //		alice, _ := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
@@ -79,10 +83,10 @@ type HashWriter interface {
 
 // Options configures how values are hashed, including support for unordered collections, interface marshaling, and zero value handling.
 type Options struct {
-	Unordered          bool
-	Text, JSON, String bool
-	ZeroNil            bool
-	IgnoreZero         bool
+	UnorderedStruct, UnorderedArray, UnorderedSlice, UnorderedSeq, UnorderedSeq2 bool
+	Text, JSON, String                                                           bool
+	ZeroNil                                                                      bool
+	IgnoreZero                                                                   bool
 }
 
 // New creates a new Hasher that uses the given hash.Hash64 constructor and Options.
@@ -96,7 +100,7 @@ type Options struct {
 func New[H hash.Hash64](init func() H, opts Options) *Hasher {
 	return &Hasher{
 		opts: opts,
-		hashPool: &sync.Pool{
+		containerPool: &sync.Pool{
 			New: func() any {
 				return &container{
 					hash:    init(),
@@ -104,8 +108,8 @@ func New[H hash.Hash64](init func() H, opts Options) *Hasher {
 				}
 			},
 		},
-		hashFuncMap:  &sync.Map{},
-		visitedTypes: []reflect.Type{},
+		hashFuncMap: &sync.Map{},
+		visited:     []reflect.Type{},
 	}
 }
 
@@ -114,10 +118,10 @@ func New[H hash.Hash64](init func() H, opts Options) *Hasher {
 // It caches reflection logic internally for performance, is safe for concurrent use,
 // and supports integration with marshaling interfaces (BinaryMarshaler, TextMarshaler, etc.).
 type Hasher struct {
-	opts         Options
-	hashPool     *sync.Pool // Pool of H.
-	hashFuncMap  *sync.Map  // Map with key reflect.Type and value hashFunc
-	visitedTypes []reflect.Type
+	opts          Options
+	containerPool *sync.Pool // Pool of *container.
+	hashFuncMap   *sync.Map  // Map with key reflect.Type and value hashFunc
+	visited       []reflect.Type
 }
 
 // Hash computes a 64-bit hash of the given value.
@@ -128,7 +132,7 @@ type Hasher struct {
 //
 // Returns the computed hash or an error if hashing fails.
 func (h *Hasher) Hash(value any) (uint64, error) {
-	c := h.hashPool.Get().(*container)
+	c := h.containerPool.Get().(*container)
 	c.Reset()
 
 	v := reflect.ValueOf(value)
@@ -136,7 +140,7 @@ func (h *Hasher) Hash(value any) (uint64, error) {
 	if !v.IsValid() {
 		result := c.hash.Sum64()
 
-		h.hashPool.Put(c)
+		h.containerPool.Put(c)
 
 		return result, nil
 	}
@@ -145,7 +149,7 @@ func (h *Hasher) Hash(value any) (uint64, error) {
 	if err != nil {
 		result := c.hash.Sum64()
 
-		h.hashPool.Put(c)
+		h.containerPool.Put(c)
 
 		return result, err
 	}
@@ -154,14 +158,14 @@ func (h *Hasher) Hash(value any) (uint64, error) {
 	if err != nil {
 		result := c.hash.Sum64()
 
-		h.hashPool.Put(c)
+		h.containerPool.Put(c)
 
 		return result, err
 	}
 
 	result := c.hash.Sum64()
 
-	h.hashPool.Put(c)
+	h.containerPool.Put(c)
 
 	return result, nil
 }
@@ -215,43 +219,57 @@ func (h *Hasher) hashInterface(value reflect.Value, c *container) error {
 	return hasher(elem, c)
 }
 
-func (h *Hasher) hashSliceArray(vhf hashFunc) hashFunc {
+func (h *Hasher) hashUnorderedSliceArray(vhf hashFunc) hashFunc {
 	return func(value reflect.Value, c *container) error {
 		var err error
 
-		if h.opts.Unordered {
-			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-				return nil
+		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			return nil
+		}
+
+		if err = c.write(startSet[:]); err != nil {
+			return err
+		}
+
+		var (
+			result uint64
+			tmp    = h.containerPool.Get().(*container)
+		)
+
+		for i := range value.Len() {
+			tmp.Reset()
+
+			v := value.Index(i)
+
+			if !v.IsValid() || (h.opts.IgnoreZero && isZero(v)) {
+				continue
 			}
 
-			if err = c.write(startSet[:]); err != nil {
+			if err = vhf(v, tmp); err != nil {
+				h.containerPool.Put(tmp)
+
 				return err
 			}
 
-			var (
-				result uint64
-				tmp    = h.hashPool.Get().(*container)
-			)
-
-			for i := range value.Len() {
-				tmp.Reset()
-
-				if err = vhf(value.Index(i), tmp); err != nil {
-					h.hashPool.Put(tmp)
-
-					return err
-				}
-
-				result ^= tmp.hash.Sum64()
-			}
-
-			h.hashPool.Put(tmp)
-
-			return twoErr(
-				c.writeUint64(result),
-				c.write(endSet[:]),
-			)
+			result ^= tmp.hash.Sum64()
 		}
+
+		h.containerPool.Put(tmp)
+
+		if result == 0 {
+			return c.write(endSet[:])
+		}
+
+		return twoErr(
+			c.writeUint64(result),
+			c.write(endSet[:]),
+		)
+	}
+}
+
+func (h *Hasher) hashSliceArray(vhf hashFunc) hashFunc {
+	return func(value reflect.Value, c *container) error {
+		var err error
 
 		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
 			return nil
@@ -261,14 +279,24 @@ func (h *Hasher) hashSliceArray(vhf hashFunc) hashFunc {
 			return err
 		}
 
+		first := true
+
 		for i := range value.Len() {
-			if i > 0 {
-				if err = c.write(comma[:]); err != nil {
-					return err
-				}
+			v := value.Index(i)
+
+			if !v.IsValid() || (h.opts.IgnoreZero && isZero(v)) {
+				continue
 			}
 
-			if err = vhf(value.Index(i), c); err != nil {
+			if !first {
+				if err := c.write(comma[:]); err != nil {
+					return err
+				}
+			} else {
+				first = false
+			}
+
+			if err = vhf(v, c); err != nil {
 				return err
 			}
 		}
@@ -286,7 +314,7 @@ func (h *Hasher) hashMap(khf, vhf hashFunc) hashFunc {
 		var (
 			result uint64
 			err    error
-			tmp    = h.hashPool.Get().(*container)
+			tmp    = h.containerPool.Get().(*container)
 			iter   = value.MapRange()
 		)
 
@@ -307,7 +335,7 @@ func (h *Hasher) hashMap(khf, vhf hashFunc) hashFunc {
 				tmp.write(colon[:]),
 				vhf(value, tmp),
 			); err != nil {
-				h.hashPool.Put(tmp)
+				h.containerPool.Put(tmp)
 
 				return err
 			}
@@ -315,7 +343,7 @@ func (h *Hasher) hashMap(khf, vhf hashFunc) hashFunc {
 			result ^= tmp.hash.Sum64()
 		}
 
-		h.hashPool.Put(tmp)
+		h.containerPool.Put(tmp)
 
 		if result == 0 {
 			return c.write(endSet[:])
@@ -335,32 +363,34 @@ type structField struct {
 }
 
 func (h *Hasher) hashStruct(sfs []structField) hashFunc {
-	return func(value reflect.Value, c *container) error {
-		if h.opts.Unordered {
-			if err := c.write(startSet[:]); err != nil {
+	if h.opts.UnorderedStruct {
+		return func(value reflect.Value, c *container) error {
+			var err error
+
+			if err = c.write(startSet[:]); err != nil {
 				return err
 			}
 
 			var (
-				tmp    = h.hashPool.Get().(*container)
+				tmp    = h.containerPool.Get().(*container)
 				result uint64
 			)
 
 			for _, sf := range sfs {
 				fv := value.Field(sf.idx)
 
-				if h.opts.IgnoreZero && fv.IsZero() {
+				if !fv.IsValid() || h.opts.IgnoreZero && isZero(fv) {
 					continue
 				}
 
 				tmp.Reset()
 
-				if err := threeErr(
+				if err = threeErr(
 					tmp.write(sf.name),
 					tmp.write(colon[:]),
 					sf.hf(fv, tmp),
 				); err != nil {
-					h.hashPool.Put(tmp)
+					h.containerPool.Put(tmp)
 
 					return err
 				}
@@ -368,19 +398,27 @@ func (h *Hasher) hashStruct(sfs []structField) hashFunc {
 				result ^= tmp.hash.Sum64()
 			}
 
-			h.hashPool.Put(tmp)
+			h.containerPool.Put(tmp)
+
+			if result == 0 {
+				return c.write(endSet[:])
+			}
 
 			return twoErr(
 				c.writeUint64(result),
 				c.write(endSet[:]),
 			)
 		}
+	}
+
+	return func(value reflect.Value, c *container) error {
+		var err error
 
 		if !value.IsValid() {
 			return nil
 		}
 
-		if err := c.write(startList[:]); err != nil {
+		if err = c.write(startList[:]); err != nil {
 			return err
 		}
 
@@ -389,7 +427,7 @@ func (h *Hasher) hashStruct(sfs []structField) hashFunc {
 		for _, sf := range sfs {
 			fv := value.Field(sf.idx)
 
-			if h.opts.IgnoreZero && fv.IsZero() {
+			if !fv.IsValid() || h.opts.IgnoreZero && isZero(fv) {
 				continue
 			}
 
@@ -401,7 +439,7 @@ func (h *Hasher) hashStruct(sfs []structField) hashFunc {
 				first = false
 			}
 
-			if err := threeErr(
+			if err = threeErr(
 				c.write(sf.name),
 				c.write(colon[:]),
 				sf.hf(fv, c),
@@ -414,181 +452,217 @@ func (h *Hasher) hashStruct(sfs []structField) hashFunc {
 	}
 }
 
-func (h *Hasher) hashSeq2(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	var (
-		err      error
-		khf, vhf hashFunc
-	)
-
-	if h.opts.Unordered {
-		if err = c.write(startSet[:]); err != nil {
-			return err
-		}
-
-		var (
-			result uint64
-			tmp    = h.hashPool.Get().(*container)
-		)
-
-		for k, v := range value.Seq2() {
-			if !k.IsValid() || !v.IsValid() {
-				continue
+func (h *Hasher) hashSeq2() hashFunc {
+	if h.opts.UnorderedSeq2 {
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
 			}
 
-			tmp.Reset()
+			var (
+				err      error
+				khf, vhf hashFunc
+			)
 
-			if khf == nil || vhf == nil {
-				khf, err = h.makeHashFunc(k.Type())
-				if err != nil {
-					h.hashPool.Put(tmp)
+			if err = c.write(startSet[:]); err != nil {
+				return err
+			}
+
+			var (
+				result uint64
+				tmp    = h.containerPool.Get().(*container)
+			)
+
+			for k, v := range value.Seq2() {
+				if !k.IsValid() || !v.IsValid() || h.opts.IgnoreZero && isZero(v) {
+					continue
+				}
+
+				tmp.Reset()
+
+				if khf == nil || vhf == nil {
+					khf, err = h.makeHashFunc(k.Type())
+					if err != nil {
+						h.containerPool.Put(tmp)
+
+						return err
+					}
+
+					vhf, err = h.makeHashFunc(v.Type())
+					if err != nil {
+						h.containerPool.Put(tmp)
+
+						return err
+					}
+				}
+
+				if err = threeErr(
+					khf(k, tmp),
+					tmp.write(colon[:]),
+					vhf(v, tmp),
+				); err != nil {
+					h.containerPool.Put(tmp)
 
 					return err
 				}
 
-				vhf, err = h.makeHashFunc(v.Type())
-				if err != nil {
-					h.hashPool.Put(tmp)
+				result ^= tmp.hash.Sum64()
+			}
 
+			h.containerPool.Put(tmp)
+
+			if result == 0 {
+				return c.write(endSet[:])
+			}
+
+			return twoErr(
+				c.writeUint64(result),
+				c.write(endSet[:]),
+			)
+		}
+	}
+
+	return func(value reflect.Value, c *container) error {
+		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			return nil
+		}
+
+		var (
+			err      error
+			khf, vhf hashFunc
+		)
+
+		if err = c.write(startList[:]); err != nil {
+			return err
+		}
+
+		for k, v := range value.Seq2() {
+			if !k.IsValid() || !v.IsValid() || h.opts.IgnoreZero && isZero(v) {
+				continue
+			}
+
+			if khf == nil || vhf == nil {
+				if khf, err = h.makeHashFunc(k.Type()); err != nil {
+					return err
+				}
+
+				if vhf, err = h.makeHashFunc(v.Type()); err != nil {
+					return err
+				}
+			} else {
+				if err = c.write(comma[:]); err != nil {
 					return err
 				}
 			}
 
 			if err = threeErr(
-				khf(k, tmp),
-				tmp.write(colon[:]),
-				vhf(v, tmp),
+				khf(k, c),
+				c.write(colon[:]),
+				vhf(v, c),
 			); err != nil {
-				h.hashPool.Put(tmp)
-
 				return err
 			}
-
-			result ^= tmp.hash.Sum64()
 		}
 
-		h.hashPool.Put(tmp)
-
-		return twoErr(
-			c.writeUint64(result),
-			c.write(endSet[:]),
-		)
+		return c.write(endList[:])
 	}
-
-	if err = c.write(startList[:]); err != nil {
-		return err
-	}
-
-	first := true
-
-	for k, v := range value.Seq2() {
-		if !k.IsValid() || !v.IsValid() {
-			continue
-		}
-
-		if !first {
-			if err = c.write(comma[:]); err != nil {
-				return err
-			}
-		} else {
-			first = false
-		}
-
-		if khf == nil || vhf == nil {
-			if khf, err = h.makeHashFunc(k.Type()); err != nil {
-				return err
-			}
-
-			if vhf, err = h.makeHashFunc(v.Type()); err != nil {
-				return err
-			}
-		}
-
-		if err = threeErr(
-			khf(k, c),
-			c.write(colon[:]),
-			vhf(v, c),
-		); err != nil {
-			return err
-		}
-	}
-
-	return c.write(endList[:])
 }
 
-func (h *Hasher) hashSeq(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
+func (h *Hasher) hashSeq() hashFunc {
+	if h.opts.UnorderedSeq {
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
+			}
+
+			var (
+				err error
+				vhf hashFunc
+			)
+
+			if err = c.write(startSet[:]); err != nil {
+				return err
+			}
+
+			var (
+				result uint64
+				tmp    = h.containerPool.Get().(*container)
+			)
+
+			for v := range value.Seq() {
+				if !v.IsValid() || h.opts.IgnoreZero && isZero(v) {
+					continue
+				}
+
+				if vhf == nil {
+					vhf, err = h.makeHashFunc(v.Type())
+					if err != nil {
+						h.containerPool.Put(tmp)
+
+						return err
+					}
+				}
+
+				tmp.Reset()
+
+				if err = vhf(v, tmp); err != nil {
+					h.containerPool.Put(tmp)
+
+					return err
+				}
+
+				result ^= tmp.hash.Sum64()
+			}
+
+			h.containerPool.Put(tmp)
+
+			if result == 0 {
+				return c.write(endSet[:])
+			}
+
+			return twoErr(
+				c.writeUint64(result),
+				c.write(endSet[:]),
+			)
+		}
 	}
 
-	var (
-		err error
-		vhf hashFunc
-	)
-
-	if h.opts.Unordered {
-		if err = c.write(startSet[:]); err != nil {
-			return err
+	return func(value reflect.Value, c *container) error {
+		if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+			return nil
 		}
 
 		var (
-			result uint64
-			tmp    = h.hashPool.Get().(*container)
+			err error
+			vhf hashFunc
 		)
 
-		for v := range value.Seq() {
-			if vhf == nil {
-				vhf, err = h.makeHashFunc(v.Type())
-				if err != nil {
-					h.hashPool.Put(tmp)
+		if err = c.write(startList[:]); err != nil {
+			return err
+		}
 
+		for v := range value.Seq() {
+			if !v.IsValid() || h.opts.IgnoreZero && isZero(v) {
+				continue
+			}
+
+			if vhf == nil {
+				if vhf, err = h.makeHashFunc(v.Type()); err != nil {
+					return err
+				}
+			} else {
+				if err = c.write(comma[:]); err != nil {
 					return err
 				}
 			}
 
-			tmp.Reset()
-
-			if err = vhf(v, tmp); err != nil {
-				h.hashPool.Put(tmp)
-
-				return err
-			}
-
-			result ^= tmp.hash.Sum64()
-		}
-
-		h.hashPool.Put(tmp)
-
-		return twoErr(
-			c.writeUint64(result),
-			c.write(endSet[:]),
-		)
-	}
-
-	if err = c.write(startList[:]); err != nil {
-		return err
-	}
-
-	for v := range value.Seq() {
-		if vhf == nil {
-			if vhf, err = h.makeHashFunc(v.Type()); err != nil {
-				return err
-			}
-		} else {
-			if err = c.write(comma[:]); err != nil {
+			if err = vhf(v, c); err != nil {
 				return err
 			}
 		}
 
-		if err = vhf(v, c); err != nil {
-			return err
-		}
+		return c.write(endList[:])
 	}
-
-	return c.write(endList[:])
 }
 
 func (h *Hasher) hashInterfaceHashWriter(value reflect.Value, c *container) error {
@@ -730,13 +804,13 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		return v.(hashFunc), nil
 	}
 
-	if slices.Contains(h.visitedTypes, t) {
+	if slices.Contains(h.visited, t) {
 		return func(reflect.Value, *container) error {
 			return nil
 		}, nil
 	}
 
-	h.visitedTypes = append(h.visitedTypes, t)
+	h.visited = append(h.visited, t)
 
 	switch {
 	case t.Implements(hashWriterType):
@@ -801,6 +875,10 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 			return nil, err
 		}
 
+		if h.opts.UnorderedArray {
+			return h.checkout(t, h.hashUnorderedSliceArray(vhf))
+		}
+
 		return h.checkout(t, h.hashSliceArray(vhf))
 	case reflect.Slice:
 		elem := t.Elem()
@@ -812,6 +890,10 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		vhf, err := h.makeHashFunc(elem)
 		if err != nil {
 			return nil, err
+		}
+
+		if h.opts.UnorderedSlice {
+			return h.checkout(t, h.hashUnorderedSliceArray(vhf))
 		}
 
 		return h.checkout(t, h.hashSliceArray(vhf))
@@ -853,11 +935,11 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 	}
 
 	if t.CanSeq2() {
-		return h.checkout(t, h.hashSeq2)
+		return h.checkout(t, h.hashSeq2())
 	}
 
 	if t.CanSeq() {
-		return h.checkout(t, h.hashSeq)
+		return h.checkout(t, h.hashSeq())
 	}
 
 	return nil, fmt.Errorf("datahash: unsupported type: %q (missing HashWriter or marshaling interface)", t)
@@ -921,4 +1003,14 @@ func threeErr(err1, err2, err3 error) error {
 	}
 
 	return err3
+}
+
+func isZero(value reflect.Value) bool {
+	var check = value
+
+	for check.IsValid() && check.Kind() == reflect.Interface && !check.IsNil() {
+		check = value.Elem()
+	}
+
+	return check.IsZero()
 }
