@@ -109,7 +109,6 @@ func New[H hash.Hash64](init func() H, opts Options) *Hasher {
 			},
 		},
 		hashFuncMap: &sync.Map{},
-		visited:     []reflect.Type{},
 	}
 }
 
@@ -121,7 +120,6 @@ type Hasher struct {
 	opts          Options
 	containerPool *sync.Pool // Pool of *container.
 	hashFuncMap   *sync.Map  // Map with key reflect.Type and value hashFunc
-	visited       []reflect.Type
 }
 
 // Hash computes a 64-bit hash of the given value.
@@ -182,42 +180,6 @@ var (
 	startList = [1]byte{0x06}
 	endList   = [1]byte{0x07}
 )
-
-func (h *Hasher) hashByteSlice(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	return c.write(value.Bytes())
-}
-
-func (h *Hasher) hashInterface(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	if value.Kind() != reflect.Interface {
-		hasher, err := h.makeHashFunc(value.Type())
-		if err != nil {
-			return err
-		}
-
-		return hasher(value, c)
-	}
-
-	elem := value.Elem()
-
-	if elem.Kind() == reflect.Invalid {
-		return nil
-	}
-
-	hasher, err := h.makeHashFunc(elem.Type())
-	if err != nil {
-		return err
-	}
-
-	return hasher(elem, c)
-}
 
 func (h *Hasher) hashUnorderedSliceArray(vhf hashFunc) hashFunc {
 	return func(value reflect.Value, c *container) error {
@@ -665,210 +627,224 @@ func (h *Hasher) hashSeq() hashFunc {
 	}
 }
 
-func (h *Hasher) hashInterfaceHashWriter(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	if !value.CanInterface() {
-		return errors.New("cannot use datahash.HashWriter on unexported fields that are not accessible via reflection")
-	}
-
-	i, ok := value.Interface().(HashWriter)
-	if !ok || i == nil {
-		return nil
-	}
-
-	return i.WriteHash(c.hash)
-}
-
-func (h *Hasher) hashInterfaceBinary(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	if !value.CanInterface() {
-		return errors.New("cannot use encoding.BinaryMarshaler on unexported fields that are not accessible via reflection")
-	}
-
-	i, ok := value.Interface().(encoding.BinaryMarshaler)
-	if !ok || i == nil {
-		return nil
-	}
-
-	v, err := i.MarshalBinary()
-	if err != nil {
-		return err
-	}
-
-	return c.write(v)
-}
-
-func (h *Hasher) hashInterfaceText(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	if !value.CanInterface() {
-		return errors.New("cannot use encoding.TextMarshaler on unexported fields that are not accessible via reflection")
-	}
-
-	i, ok := value.Interface().(encoding.TextMarshaler)
-	if !ok || i == nil {
-		return nil
-	}
-
-	v, err := i.MarshalText()
-	if err != nil {
-		return err
-	}
-
-	return c.write(v)
-}
-
-func (h *Hasher) hashInterfaceJSON(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	if !value.CanInterface() {
-		return errors.New("cannot use json.Marshaler on unexported fields that are not accessible via reflection")
-	}
-
-	i, ok := value.Interface().(json.Marshaler)
-	if !ok || i == nil {
-		return nil
-	}
-
-	v, err := i.MarshalJSON()
-	if err != nil {
-		return err
-	}
-
-	return c.write(v)
-}
-
-func (h *Hasher) hashInterfaceStringer(value reflect.Value, c *container) error {
-	if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
-		return nil
-	}
-
-	if !value.CanInterface() {
-		return errors.New("cannot use fmt.Stringer on unexported fields that are not accessible via reflection")
-	}
-
-	i, ok := value.Interface().(fmt.Stringer)
-	if !ok || i == nil {
-		return nil
-	}
-
-	return c.write(stringToBytes(i.String()))
-}
-
-func (h *Hasher) hashPointer(t reflect.Type, hf hashFunc) hashFunc {
-	return func(value reflect.Value, c *container) error {
-		if !value.IsValid() {
-			return nil
-		}
-
-		if value.IsNil() {
-			if h.opts.ZeroNil {
-				return hf(reflect.Zero(t.Elem()), c)
-			}
-
-			return nil
-		}
-
-		addr := value.Pointer()
-		if slices.Contains(c.visited, addr) {
-			return nil
-		}
-
-		c.visited = append(c.visited, addr)
-
-		return hf(value.Elem(), c)
-	}
-}
-
 var (
 	hashWriterType      = reflect.TypeFor[HashWriter]()
 	binaryMarshalerType = reflect.TypeFor[encoding.BinaryMarshaler]()
 	textMarshalerType   = reflect.TypeFor[encoding.TextMarshaler]()
 	jsonMarshalerType   = reflect.TypeFor[json.Marshaler]()
 	stringerType        = reflect.TypeFor[fmt.Stringer]()
+
+	noop hashFunc = func(reflect.Value, *container) error {
+		return nil
+	}
 )
 
 func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
-	v, ok := h.hashFuncMap.Load(t)
+	v, ok := h.hashFuncMap.LoadOrStore(t, noop)
 	if ok {
 		return v.(hashFunc), nil
 	}
 
-	if slices.Contains(h.visited, t) {
-		return func(reflect.Value, *container) error {
-			return nil
-		}, nil
-	}
-
-	h.visited = append(h.visited, t)
+	defer func() {
+		if err == nil {
+			h.hashFuncMap.Store(t, hf)
+		}
+	}()
 
 	switch {
 	case t.Implements(hashWriterType):
-		return h.checkout(t, h.hashInterfaceHashWriter)
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
+			}
+
+			if !value.CanInterface() {
+				return errors.New("cannot use datahash.HashWriter on unexported fields that are not accessible via reflection")
+			}
+
+			i, ok := value.Interface().(HashWriter)
+			if !ok || i == nil {
+				return nil
+			}
+
+			return i.WriteHash(c.hash)
+		}, nil
 	case t.Implements(binaryMarshalerType):
-		return h.checkout(t, h.hashInterfaceBinary)
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
+			}
+
+			if !value.CanInterface() {
+				return errors.New("cannot use encoding.BinaryMarshaler on unexported fields that are not accessible via reflection")
+			}
+
+			i, ok := value.Interface().(encoding.BinaryMarshaler)
+			if !ok || i == nil {
+				return nil
+			}
+
+			v, err := i.MarshalBinary()
+			if err != nil {
+				return err
+			}
+
+			return c.write(v)
+		}, nil
 	case h.opts.Text && t.Implements(textMarshalerType):
-		return h.checkout(t, h.hashInterfaceText)
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
+			}
+
+			if !value.CanInterface() {
+				return errors.New("cannot use encoding.TextMarshaler on unexported fields that are not accessible via reflection")
+			}
+
+			i, ok := value.Interface().(encoding.TextMarshaler)
+			if !ok || i == nil {
+				return nil
+			}
+
+			v, err := i.MarshalText()
+			if err != nil {
+				return err
+			}
+
+			return c.write(v)
+		}, nil
 	case h.opts.JSON && t.Implements(jsonMarshalerType):
-		return h.checkout(t, h.hashInterfaceJSON)
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
+			}
+
+			if !value.CanInterface() {
+				return errors.New("cannot use json.Marshaler on unexported fields that are not accessible via reflection")
+			}
+
+			i, ok := value.Interface().(json.Marshaler)
+			if !ok || i == nil {
+				return nil
+			}
+
+			v, err := i.MarshalJSON()
+			if err != nil {
+				return err
+			}
+
+			return c.write(v)
+		}, nil
 	case h.opts.String && t.Implements(stringerType):
-		return h.checkout(t, h.hashInterfaceStringer)
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
+			}
+
+			if !value.CanInterface() {
+				return errors.New("cannot use fmt.Stringer on unexported fields that are not accessible via reflection")
+			}
+
+			i, ok := value.Interface().(fmt.Stringer)
+			if !ok || i == nil {
+				return nil
+			}
+
+			return c.write(stringToBytes(i.String()))
+		}, nil
 	}
 
 	switch t.Kind() {
 	case reflect.Interface:
-		return h.checkout(t, h.hashInterface)
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+				return nil
+			}
+
+			if value.Kind() != reflect.Interface {
+				hasher, err := h.makeHashFunc(value.Type())
+				if err != nil {
+					return err
+				}
+
+				return hasher(value, c)
+			}
+
+			elem := value.Elem()
+
+			if elem.Kind() == reflect.Invalid {
+				return nil
+			}
+
+			hasher, err := h.makeHashFunc(elem.Type())
+			if err != nil {
+				return err
+			}
+
+			return hasher(elem, c)
+		}, nil
 	case reflect.Pointer:
 		ehf, err := h.makeHashFunc(t.Elem())
 		if err != nil {
 			return nil, err
 		}
 
-		return h.checkout(t, h.hashPointer(t, ehf))
+		return func(value reflect.Value, c *container) error {
+			if !value.IsValid() {
+				return nil
+			}
+
+			if value.IsNil() {
+				if h.opts.ZeroNil {
+					return ehf(reflect.Zero(t.Elem()), c)
+				}
+
+				return nil
+			}
+
+			addr := value.Pointer()
+			if slices.Contains(c.visited, addr) {
+				return nil
+			}
+
+			c.visited = append(c.visited, addr)
+
+			return ehf(value.Elem(), c)
+		}, nil
 	case reflect.String:
-		return h.checkout(t, func(value reflect.Value, c *container) error {
+		return func(value reflect.Value, c *container) error {
 			return c.write(stringToBytes(value.String()))
-		})
+		}, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return h.checkout(t, func(value reflect.Value, c *container) error {
+		return func(value reflect.Value, c *container) error {
 			//nolint:gosec
 			return c.writeUint64(uint64(value.Int()))
-		})
+		}, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return h.checkout(t, func(value reflect.Value, c *container) error {
+		return func(value reflect.Value, c *container) error {
 			return c.writeUint64(value.Uint())
-		})
+		}, nil
 	case reflect.Float32, reflect.Float64:
-		return h.checkout(t, func(value reflect.Value, c *container) error {
+		return func(value reflect.Value, c *container) error {
 			return c.writeFloat64(value.Float())
-		})
+		}, nil
 	case reflect.Complex64, reflect.Complex128:
-		return h.checkout(t, func(value reflect.Value, c *container) error {
+		return func(value reflect.Value, c *container) error {
 			v := value.Complex()
 
 			return twoErr(
 				c.writeFloat64(real(v)),
 				c.writeFloat64(imag(v)),
 			)
-		})
+		}, nil
 	case reflect.Bool:
-		return h.checkout(t, func(value reflect.Value, c *container) error {
+		return func(value reflect.Value, c *container) error {
 			if value.Bool() {
 				return c.write(byteTrue[:])
 			}
 
 			return c.write(byteFalse[:])
-		})
+		}, nil
 	case reflect.Array:
 		vhf, err := h.makeHashFunc(t.Elem())
 		if err != nil {
@@ -876,15 +852,21 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		}
 
 		if h.opts.UnorderedArray {
-			return h.checkout(t, h.hashUnorderedSliceArray(vhf))
+			return h.hashUnorderedSliceArray(vhf), nil
 		}
 
-		return h.checkout(t, h.hashSliceArray(vhf))
+		return h.hashSliceArray(vhf), nil
 	case reflect.Slice:
 		elem := t.Elem()
 
 		if elem.Kind() == reflect.Uint8 {
-			return h.checkout(t, h.hashByteSlice)
+			return func(value reflect.Value, c *container) error {
+				if !value.IsValid() || (h.opts.IgnoreZero && value.IsZero()) {
+					return nil
+				}
+
+				return c.write(value.Bytes())
+			}, nil
 		}
 
 		vhf, err := h.makeHashFunc(elem)
@@ -893,10 +875,10 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 		}
 
 		if h.opts.UnorderedSlice {
-			return h.checkout(t, h.hashUnorderedSliceArray(vhf))
+			return h.hashUnorderedSliceArray(vhf), nil
 		}
 
-		return h.checkout(t, h.hashSliceArray(vhf))
+		return h.hashSliceArray(vhf), nil
 	case reflect.Map:
 		khf, err := h.makeHashFunc(t.Key())
 		if err != nil {
@@ -908,7 +890,7 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 			return nil, err
 		}
 
-		return h.checkout(t, h.hashMap(khf, vhf))
+		return h.hashMap(khf, vhf), nil
 	case reflect.Struct:
 		sfs := make([]structField, 0, t.NumField())
 
@@ -931,24 +913,18 @@ func (h *Hasher) makeHashFunc(t reflect.Type) (hf hashFunc, err error) {
 			})
 		}
 
-		return h.checkout(t, h.hashStruct(sfs))
+		return h.hashStruct(sfs), nil
 	}
 
 	if t.CanSeq2() {
-		return h.checkout(t, h.hashSeq2())
+		return h.hashSeq2(), nil
 	}
 
 	if t.CanSeq() {
-		return h.checkout(t, h.hashSeq())
+		return h.hashSeq(), nil
 	}
 
 	return nil, fmt.Errorf("datahash: unsupported type: %q (missing HashWriter or marshaling interface)", t)
-}
-
-func (h *Hasher) checkout(t reflect.Type, hf hashFunc) (hashFunc, error) {
-	h.hashFuncMap.Store(t, hf)
-
-	return hf, nil
 }
 
 type container struct {
