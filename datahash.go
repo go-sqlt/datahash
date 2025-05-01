@@ -962,23 +962,31 @@ func stringToBytes(s string) []byte {
 }
 
 func twoErr(err1, err2 error) error {
-	if err1 != nil {
-		return err1
-	}
-
-	return err2
-}
-
-func threeErr(err1, err2, err3 error) error {
-	if err1 != nil {
-		return err1
-	}
-
-	if err2 != nil {
+	if err1 == nil {
 		return err2
 	}
 
-	return err3
+	if err2 == nil {
+		return err1
+	}
+
+	return errors.Join(err1, err2)
+}
+
+func threeErr(err1, err2, err3 error) error {
+	if err1 == nil {
+		return twoErr(err2, err3)
+	}
+
+	if err2 == nil {
+		return twoErr(err1, err3)
+	}
+
+	if err3 == nil {
+		return twoErr(err1, err2)
+	}
+
+	return errors.Join(err1, err2, err3)
 }
 
 func isZero(value reflect.Value) bool {
