@@ -11,43 +11,45 @@
 //
 // Usage:
 //
-// package main
-//
-// import (
-//
-//	"fmt"
-//	"math/big"
-//
-//	"github.com/cespare/xxhash/v2"
-//	"github.com/go-sqlt/datahash"
-//
-// )
-//
-//	type MyStruct struct {
-//		Name  string `datahash:"-"`
-//		Age   int
-//		Float *big.Float
-//	}
-//
-//	func main() {
-//		hasher := datahash.New(xxhash.New, datahash.Options{
-//			UnorderedStruct: false,
-//			UnorderedSlice:  false,
-//			UnorderedArray:  false,
-//			UnorderedSeq:    false,
-//			UnorderedSeq2:   false,
-//			Text:            true, // big.Float implements encoding.TextMarshaler
-//			JSON:            false,
-//			String:          false,
-//			ZeroNil:         false,
-//			IgnoreZero:      false,
-//		})
-//
-//		alice, _ := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
-//		bob, _ := hasher.Hash(MyStruct{Name: "Bob", Age: 30, Float: big.NewFloat(1.23)})
-//
-//		fmt.Println(alice, alice == bob) // Output: 13125691809697640472 true
-//	}
+/*
+
+package main
+
+import (
+	"fmt"
+	"math/big"
+
+	"github.com/cespare/xxhash/v2"
+	"github.com/go-sqlt/datahash"
+)
+
+type MyStruct struct {
+	Name  string `datahash:"-"`
+	Age   int
+	Float *big.Float
+}
+
+func main() {
+	hasher := datahash.New(xxhash.New, datahash.Options{
+		UnorderedStruct: false,
+		UnorderedSlice:  false,
+		UnorderedArray:  false,
+		UnorderedSeq:    false,
+		UnorderedSeq2:   false,
+		Text:            true, // big.Float implements encoding.TextMarshaler
+		JSON:            false,
+		String:          false,
+		ZeroNil:         false,
+		IgnoreZero:      false,
+	})
+
+	alice, _ := hasher.Hash(MyStruct{Name: "Alice", Age: 30, Float: big.NewFloat(1.23)})
+	bob, _ := hasher.Hash(MyStruct{Name: "Bob", Age: 30, Float: big.NewFloat(1.23)})
+
+	fmt.Println(alice, alice == bob) // Output: 13125691809697640472 true
+}
+
+*/
 //
 // Notes:
 //   - For custom hashing behavior, implement the HashWriter or encoing.BinaryMarshaler interface.
